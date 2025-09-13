@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Privacy Guard
 // @namespace    com.aesthermortis.privacy-guard
-// @version      1.1.0
+// @version      1.2.0
 // @description  A UserScript to enhance privacy by blocking trackers and analytics.
 // @author       Aesthermortis
 // @match        *://*/*
@@ -35,8 +35,36 @@
     // Facebook
     "facebook.com/plugins",
     "facebook.com/v", // Covers /vXX.X/
+    // Github
+    "collector.github.com",
+    "api.github.com/_private/browser/stats",
     // Add more patterns here
   ];
+
+  /**
+   * A list of domains that should never be blocked.
+   * This acts as a whitelist to prevent breaking essential site functionality.
+   * @type {string[]}
+   */
+  const ALLOWED_PATTERNS = [
+    // Add trusted domains here
+  ];
+
+  /**
+   * Runtime mode toggles.
+   * - networkBlock: "fail" emulates a real network failure (recommended to avoid spinners).
+   *                  "silent" returns empty 204 responses (may break some UIs).
+   */
+  const MODE = {
+    networkBlock: "fail", // "fail" | "silent"
+  };
+
+  // Script blocking strategy:
+  // - "createElement": maximum coverage (intercepts .src before execution)
+  // - "observer": conservative; neutralizes after insertion
+  const CONFIG = {
+    scriptBlockMode: "createElement", // "createElement" | "observer"
+  };
 
   /**
    * Main object to encapsulate all logic.
@@ -51,8 +79,26 @@
       if (!url) {
         return false;
       }
-      // Using 'some' is efficient as it stops on the first match.
-      return BLOCKED_PATTERNS.some((pattern) => url.includes(pattern));
+
+      // Convert to string to handle URL objects
+      const urlString = String(url);
+
+      // Do not block internal/browser-only schemes
+      if (
+        urlString.startsWith("blob:") ||
+        urlString.startsWith("data:") ||
+        urlString.startsWith("chrome-extension:")
+      ) {
+        return false;
+      }
+
+      // Whitelist check: if the URL matches an allowed pattern, do not block it.
+      if (ALLOWED_PATTERNS.some((pattern) => urlString.includes(pattern))) {
+        return false;
+      }
+
+      // Blacklist check: block if it matches a blocked pattern.
+      return BLOCKED_PATTERNS.some((pattern) => urlString.includes(pattern));
     },
 
     /**
@@ -63,6 +109,56 @@
     removeNode(node, reason) {
       node.remove();
       console.debug(`[Privacy Guard] Blocked and removed ${reason}:`, node.src || "");
+    },
+
+    /**
+     * Intercepts the creation of script elements to block them before they are
+     * added to the DOM, preventing execution entirely. This is the most effective
+     * method against dynamically injected scripts.
+     */
+    interceptElementCreation() {
+      const originalCreateElement = document.createElement;
+      const self = this;
+
+      document.createElement = function (...args) {
+        const element = originalCreateElement.apply(this, args);
+        const tagName = args[0]?.toLowerCase();
+
+        if (tagName === "script") {
+          Object.defineProperty(element, "src", {
+            configurable: true,
+            enumerable: true,
+            set(value) {
+              if (self.shouldBlock(value)) {
+                console.debug("[Privacy Guard] Prevented script creation:", value);
+                // Set a non-executable type to neutralize the script
+                element.setAttribute("type", "text/plain");
+              }
+              // Set the original value (or let it be handled by the neutralized type)
+              element.setAttribute("src", value);
+            },
+            get() {
+              return element.getAttribute("src");
+            },
+          });
+        }
+        return element;
+      };
+    },
+
+    /**
+     * Neutralize a <script> element safely (prevents execution).
+     */
+    neutralizeScript(el) {
+      try {
+        el.type = "text/plain";
+      } catch (_) {}
+      try {
+        el.removeAttribute("nonce");
+      } catch (_) {}
+      try {
+        this.removeNode(el, "script");
+      } catch (_) {}
     },
 
     /**
@@ -82,7 +178,7 @@
 
       // Block scripts
       if (node.tagName === "SCRIPT" && this.shouldBlock(node.src)) {
-        this.removeNode(node, "script");
+        this.neutralizeScript(node);
         return;
       }
 
@@ -90,22 +186,38 @@
       const elements = node.querySelectorAll("iframe[src], script[src]");
       elements.forEach((el) => {
         if (this.shouldBlock(el.src)) {
-          this.removeNode(el, el.tagName.toLowerCase());
+          if (el.tagName === "SCRIPT") {
+            this.neutralizeScript(el);
+          } else {
+            this.removeNode(el, el.tagName.toLowerCase());
+          }
         }
       });
     },
 
     /**
      * Sets up a MutationObserver to watch for dynamically added nodes.
+     * Starts as early as possible.
      */
     observeDOMChanges() {
       const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
-          mutation.addedNodes.forEach((node) => this.scanNodeForBlockedElements(node));
+          mutation.addedNodes.forEach((node) => {
+            if (node && node.nodeType === Node.ELEMENT_NODE && node.tagName === "SCRIPT") {
+              const src = node.getAttribute("src") || "";
+              if (this.shouldBlock(src)) {
+                // Try to neutralize before execution
+                this.neutralizeScript(node);
+                return;
+              }
+            }
+            this.scanNodeForBlockedElements(node);
+          });
         }
       });
 
-      observer.observe(document.documentElement, {
+      // Observe as early as possible
+      observer.observe(document.documentElement || document, {
         childList: true,
         subtree: true,
       });
@@ -115,17 +227,25 @@
      * Intercepts `fetch` requests to block trackers.
      */
     interceptFetch() {
-      const originalFetch = window.fetch;
-      window.fetch = (...args) => {
+      // IMPORTANT: bind original fetch to window to avoid "Illegal invocation"
+      const originalFetch = window.fetch.bind(window);
+      // Use a normal function to keep a callable with a proper [[ThisMode]]
+      window.fetch = function (...args) {
         const [input] = args;
         const url = typeof input === "string" ? input : input?.url || "";
 
-        if (this.shouldBlock(url)) {
+        if (PrivacyGuard.shouldBlock(url)) {
           console.debug("[Privacy Guard] Blocked fetch:", url);
-          return Promise.resolve(new Response(null, { status: 204, statusText: "No Content" }));
+          if (MODE.networkBlock === "silent") {
+            // Previous behavior (NOT recommended): may leave UIs in loading state.
+            return Promise.resolve(new Response(null, { status: 204, statusText: "No Content" }));
+          } else {
+            // Emulate real network failure. Many apps already handle this case gracefully.
+            return Promise.reject(new TypeError("PrivacyGuard blocked: " + url));
+          }
         }
 
-        return originalFetch.apply(this, args);
+        return originalFetch(...args);
       };
     },
 
@@ -141,7 +261,8 @@
       navigator.sendBeacon = (url, data) => {
         if (this.shouldBlock(url)) {
           console.debug("[Privacy Guard] Blocked beacon:", url);
-          return true; // Pretend the request was sent successfully
+          // Indicate failure so sites don't assume it worked.
+          return false;
         }
         return originalSendBeacon(url, data);
       };
@@ -165,9 +286,18 @@
       XMLHttpRequest.prototype.send = function (...args) {
         if (this._privacyGuardUrl && self.shouldBlock(String(this._privacyGuardUrl))) {
           console.debug("[Privacy Guard] Blocked XHR:", this._privacyGuardUrl);
-          // Silently abort the request by not calling the original `send`.
-          // Dispatch a 'loadend' event to allow any dependent logic to complete.
-          this.dispatchEvent(new Event("loadend"));
+          // Emulate real network failure: dispatch 'error' and 'abort', then 'loadend'
+          Promise.resolve().then(() => {
+            try {
+              this.dispatchEvent(new ProgressEvent("error"));
+            } catch (_) {}
+            try {
+              this.dispatchEvent(new ProgressEvent("abort"));
+            } catch (_) {}
+            try {
+              this.dispatchEvent(new Event("loadend"));
+            } catch (_) {}
+          });
           return;
         }
         originalSend.apply(this, args);
@@ -178,19 +308,23 @@
      * Initializes all privacy-enhancing features.
      */
     init() {
-      // Intercept network requests first
+      // Script interception (strategy selectable)
+      if (CONFIG.scriptBlockMode === "createElement") {
+        this.interceptElementCreation();
+      }
+
+      // Start observing DOM immediately
+      this.observeDOMChanges();
+
+      // Network interceptions
       this.interceptFetch();
       this.interceptBeacon();
       this.interceptXHR();
 
-      // Handle DOM elements. Run immediately on existing elements.
-      // The check for `document.body` handles scripts running on a blank page.
-      if (document.body) {
-        this.scanNodeForBlockedElements(document.body);
-      }
-
-      // Then, observe for future changes.
-      this.observeDOMChanges();
+      // One full scan when the page is stable
+      window.addEventListener("load", () =>
+        this.scanNodeForBlockedElements(document.documentElement),
+      );
     },
   };
 
