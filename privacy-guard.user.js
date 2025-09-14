@@ -655,6 +655,20 @@
       );
     },
 
+    // Intercept context menu to clean links before user copies them
+    interceptContextMenu() {
+      document.addEventListener(
+        "contextmenu",
+        (e) => {
+          const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
+          if (a) {
+            this.rewriteElAttr(a, "href");
+          }
+        },
+        true,
+      );
+    },
+
     // Intercept hover to clean links before user sees them
     interceptHover() {
       document.addEventListener(
@@ -733,6 +747,7 @@
         this.sweep(document);
       }
       this.interceptClicks();
+      this.interceptContextMenu();
       this.interceptHover();
       this.interceptHistory();
       this.observeMutations();
