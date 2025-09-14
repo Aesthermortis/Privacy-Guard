@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Privacy Guard
 // @namespace    com.aesthermortis.privacy-guard
-// @version      1.2.0
+// @version      1.3.0
 // @description  A UserScript to enhance privacy by blocking trackers and analytics.
 // @author       Aesthermortis
 // @match        *://*/*
@@ -38,6 +38,10 @@
     // Github
     "collector.github.com",
     "api.github.com/_private/browser/stats",
+    // ChatGPT
+    "chatgpt.com/ces/",
+    // Other common trackers
+    "overbridgenet.com/jsv8/offer",
     // Add more patterns here
   ];
 
@@ -48,6 +52,20 @@
    */
   const ALLOWED_PATTERNS = [
     // Add trusted domains here
+  ];
+
+  /**
+   * Allowed URL schemes that should never be blocked.
+   * This prevents blocking internal browser URLs and data URIs.
+   * @type {string[]}
+   */
+  const ALLOWED_SCHEMES = [
+    "blob:",
+    "data:",
+    "chrome-extension:",
+    "about:", // about:blank
+    "moz-extension:", // Firefox
+    "safari-extension:", // Safari
   ];
 
   /**
@@ -83,13 +101,21 @@
       // Convert to string to handle URL objects
       const urlString = String(url);
 
-      // Do not block internal/browser-only schemes
-      if (
-        urlString.startsWith("blob:") ||
-        urlString.startsWith("data:") ||
-        urlString.startsWith("chrome-extension:")
-      ) {
-        return false;
+      // Do not block internal/browser schemes
+      for (const scheme of ALLOWED_SCHEMES) {
+        if (urlString.startsWith(scheme)) {
+          return false;
+        }
+      }
+
+      // Never block the current origin (same host)
+      try {
+        const u = new URL(urlString, location.href);
+        if (u.hostname === location.hostname) {
+          return false;
+        }
+      } catch (_) {
+        /* ignore */
       }
 
       // Whitelist check: if the URL matches an allowed pattern, do not block it.
@@ -321,10 +347,370 @@
       this.interceptBeacon();
       this.interceptXHR();
 
+      // Enable URL cleaning runtime
+      URLCleaningRuntime.init();
+
       // One full scan when the page is stable
       window.addEventListener("load", () =>
         this.scanNodeForBlockedElements(document.documentElement),
       );
+    },
+  };
+
+  /**
+   * --- URL Cleaning Module ----------------------------------------------------
+   * Strips tracking params, resolves redirectors, and canonicalizes known sites.
+   * Includes Amazon rules with safety guards for auth/checkout.
+   */
+  const URLCleaner = {
+    // Global param blacklist (lowercased compare)
+    GLOBAL_STRIP: new Set([
+      // Common marketing
+      "utm_source",
+      "utm_medium",
+      "utm_campaign",
+      "utm_term",
+      "utm_content",
+      "utm_id",
+      "utm_name",
+      "utm_reader",
+      "utm_brand",
+      "utm_social",
+      "utm_viz_id",
+      // Ad/attribution
+      "gclid",
+      "dclid",
+      "msclkid",
+      "fbclid",
+      "twclid",
+      "igshid",
+      "vero_id",
+      "mc_eid",
+      "spm",
+      "sc_cid",
+      "s_cid",
+      "pk_campaign",
+      "pk_kwd",
+      // Misc
+      "referrer",
+      "ref_src",
+      "ref_url",
+      "source",
+      "cmp",
+      "campaign",
+      "adid",
+      "ad",
+      "cid",
+      // Extra noise seen in the wild
+      "_hsenc",
+      "_hsmi",
+      "oly_anon_id",
+      "oly_enc_id",
+      "mkt_tok",
+      "algo_pvid",
+      "algo_exp_id",
+    ]),
+
+    // Redirector patterns: extract ?u= or ?url= etc.
+    REDIRECTORS: [
+      { hostIncludes: "l.facebook.com", param: ["u", "url"] },
+      { hostIncludes: "lm.facebook.com", param: ["u", "url"] },
+      { hostIncludes: "out.reddit.com", param: ["url"] },
+      { hostIncludes: "t.co", param: ["url"] },
+      { hostIncludes: "google.com", pathHas: "/url", param: ["q", "url", "u"] },
+      { hostIncludes: "news.google", pathHas: "/articles", param: ["url"] },
+    ],
+
+    // Domain-specific rules (lower priority than redirect resolution)
+    byDomain(u) {
+      const host = u.hostname.toLowerCase();
+
+      // AMAZON: canonicalize to /dp/ASIN and strip noisy params.
+      if (
+        host.endsWith(".amazon.com") ||
+        host.endsWith(".amazon.co.uk") ||
+        host.endsWith(".amazon.de") ||
+        host.endsWith(".amazon.fr") ||
+        host.endsWith(".amazon.es") ||
+        host.endsWith(".amazon.it") ||
+        host.endsWith(".amazon.ca") ||
+        host.endsWith(".amazon.com.mx") ||
+        host.endsWith(".amazon.co.jp") ||
+        host === "amazon.com"
+      ) {
+        this.cleanAmazon(u);
+      }
+    },
+
+    // Conservative Amazon cleaner
+    cleanAmazon(u) {
+      // Avoid touching auth, payment, cart, and digital endpoints
+      const p = u.pathname;
+      if (
+        p.startsWith("/ap/") || // auth
+        p.startsWith("/gp/buy/") || // checkout
+        p.startsWith("/cart/") || // cart
+        p.startsWith("/hz/") || // internal flows
+        p.startsWith("/gp/video/") || // prime video
+        p.startsWith("/sspa/") // sponsored flows
+      ) {
+        return;
+      }
+
+      // Extract ASIN if present, then canonicalize
+      // Matches /dp/<ASIN> or /gp/product/<ASIN> or /gp/aw/d/<ASIN>
+      const asinMatch =
+        p.match(/\/dp\/([A-Z0-9]{10})/i) ||
+        p.match(/\/gp\/product\/([A-Z0-9]{10})/i) ||
+        p.match(/\/gp\/aw\/d\/([A-Z0-9]{10})/i);
+
+      if (asinMatch) {
+        const asin = asinMatch[1].toUpperCase();
+        u.pathname = `/dp/${asin}`;
+        // Keep only variation or device-critical params if present (very conservative)
+        const allowed = new Set([
+          // keep none by default; Amazon recalculates variations from page
+          // Add keys here if you find necessary cases (e.g., 'th','psc')
+        ]);
+        this.stripParams(u, allowed, /* preserveCase */ false);
+        return;
+      }
+
+      // For general Amazon links (search, lists), strip marketing trash
+      // but preserve essential search intent.
+      const allowed = new Set([
+        "k", // search keywords
+        "rh", // filters
+        "bbn", // browse node
+        "i", // department
+      ]);
+      this.stripParams(u, allowed, /* preserveCase*/ false);
+    },
+
+    // Remove tracking params globally, preserving an allowlist if provided
+    stripParams(u, allowlist = new Set(), preserveCase = false) {
+      const params = u.searchParams;
+      // Build list to delete to avoid mutating while iterating
+      const toDelete = [];
+      for (const [k, v] of params.entries()) {
+        const keyLC = k.toLowerCase();
+        const inAllow = preserveCase ? allowlist.has(k) : allowlist.has(keyLC);
+        if (!inAllow && (this.GLOBAL_STRIP.has(keyLC) || keyLC.startsWith("utm_"))) {
+          toDelete.push(k);
+          continue;
+        }
+        // also kill empty params and obvious noise
+        if (
+          !inAllow &&
+          (v === "" || keyLC === "ref" || keyLC === "ref_src" || keyLC === "ref_url")
+        ) {
+          toDelete.push(k);
+          continue;
+        }
+      }
+      for (const k of toDelete) {
+        params.delete(k);
+      }
+      // Remove trailing "ref" segments from path e.g., /dp/ASIN/ref=something
+      u.pathname = u.pathname.replace(/\/ref=[^/]+$/i, "");
+    },
+
+    // Resolve known redirectors: if ?u= or ?url= present, replace with inner URL
+    resolveRedirector(u) {
+      const host = u.hostname.toLowerCase();
+      const path = u.pathname;
+      for (const r of this.REDIRECTORS) {
+        if (host.includes(r.hostIncludes) && (!r.pathHas || path.includes(r.pathHas))) {
+          for (const name of r.param) {
+            const target = u.searchParams.get(name);
+            if (target) {
+              try {
+                return new URL(target);
+              } catch (_) {
+                // sometimes the value is encoded twice
+                try {
+                  return new URL(decodeURIComponent(target));
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      }
+      return null;
+    },
+
+    // Normalize (lowercase host, remove default ports, collapse duplicate encoding)
+    normalize(u) {
+      u.hostname = u.hostname.toLowerCase();
+      if (
+        (u.protocol === "http:" && u.port === "80") ||
+        (u.protocol === "https:" && u.port === "443")
+      ) {
+        u.port = "";
+      }
+      // collapse multiple slashes except after protocol
+      u.pathname = u.pathname.replace(/\/{2,}/g, "/");
+      // strip empty query
+      if ([...u.searchParams.keys()].length === 0) {
+        u.search = "";
+      }
+    },
+
+    // Main entry: returns cleaned href as string
+    cleanHref(input, base = location.href) {
+      let u;
+      try {
+        u = new URL(input, base);
+      } catch (_) {
+        return input; // non-URL or malformed
+      }
+
+      // Don’t touch internal schemes
+      const s = u.protocol + "";
+      if (s === "javascript:" || s === "data:" || s === "blob:" || s === "about:") {
+        return u.toString();
+      }
+
+      // 1) Try to unwrap redirectors
+      const unwrapped = this.resolveRedirector(u);
+      if (unwrapped) {
+        u = unwrapped;
+      }
+
+      // 2) Global param strip
+      this.stripParams(u);
+
+      // 3) Domain-specific tweaks
+      this.byDomain(u);
+
+      // 4) Normalize
+      this.normalize(u);
+
+      return u.toString();
+    },
+  };
+
+  /**
+   * --- DOM/SPA Integration for Cleaning --------------------------------------
+   * Rewrites href/src/action when discovered or on navigation.
+   */
+  const URLCleaningRuntime = {
+    // Rewrite a single element in-place if attribute exists
+    rewriteElAttr(el, attr) {
+      const val = el.getAttribute(attr);
+      if (!val) {
+        return;
+      }
+      const cleaned = URLCleaner.cleanHref(val);
+      if (cleaned && cleaned !== val) {
+        el.setAttribute(attr, cleaned);
+        el.dataset.privacyGuardCleaned = "1";
+      }
+    },
+
+    // Initial and incremental sweeps
+    sweep(root) {
+      if (!root || root.nodeType !== Node.ELEMENT_NODE) {
+        return;
+      }
+      // Only scan relevant elements
+      root.querySelectorAll("a[href], img[src], form[action]").forEach((el) => {
+        if (el.dataset.privacyGuardCleaned === "1") {
+          return;
+        }
+        if (el.tagName === "A") {
+          this.rewriteElAttr(el, "href");
+        } else if (el.tagName === "IMG") {
+          this.rewriteElAttr(el, "src");
+        } else if (el.tagName === "FORM") {
+          this.rewriteElAttr(el, "action");
+        }
+      });
+    },
+
+    // Intercept clicks to ensure last-moment cleaning (covers dynamic href)
+    interceptClicks() {
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
+          if (!a) {
+            return;
+          }
+          this.rewriteElAttr(a, "href");
+        },
+        true, // capture to run before site handlers
+      );
+    },
+
+    // Patch history API to clean pushState/replaceState URLs (SPA)
+    interceptHistory() {
+      const patch = (m) => {
+        const original = history[m];
+        history[m] = function (state, title, url) {
+          if (typeof url === "string") {
+            url = URLCleaner.cleanHref(url);
+          }
+          return original.apply(this, [state, title, url]);
+        };
+      };
+      patch("pushState");
+      patch("replaceState");
+
+      // Also react to popstate-driven navigations by sweeping DOM
+      window.addEventListener("popstate", () => {
+        this.sweep(document);
+      });
+    },
+
+    // Observe added nodes; filter to relevant elements for performance
+    observeMutations() {
+      const obs = new MutationObserver((muts) => {
+        for (const m of muts) {
+          m.addedNodes.forEach((n) => {
+            if (n && n.nodeType === Node.ELEMENT_NODE) {
+              // Clean the node itself if it is relevant
+              if (n.matches && n.matches("a[href],img[src],form[action]")) {
+                this.sweep(n);
+              } else {
+                // Or scan its children (bounded)
+                this.sweep(n);
+              }
+            }
+          });
+          if (m.type === "attributes" && m.target && m.target.nodeType === Node.ELEMENT_NODE) {
+            const t = m.target;
+            if (
+              m.attributeName === "href" ||
+              m.attributeName === "src" ||
+              m.attributeName === "action"
+            ) {
+              this.sweep(t);
+            }
+          }
+        }
+      });
+
+      obs.observe(document.documentElement || document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["href", "src", "action"],
+      });
+    },
+
+    init() {
+      // Initial sweep once DOM is ready enough
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", () => this.sweep(document));
+      } else {
+        this.sweep(document);
+      }
+      this.interceptClicks();
+      this.interceptHistory();
+      this.observeMutations();
+      // Final pass on full load (late-injected links)
+      window.addEventListener("load", () => this.sweep(document));
     },
   };
 
