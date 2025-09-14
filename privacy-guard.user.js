@@ -467,22 +467,22 @@
       if (asinMatch) {
         const asin = asinMatch[1].toUpperCase();
         u.pathname = `/dp/${asin}`;
-        // Keep only variation or device-critical params if present (very conservative)
-        const allowed = new Set([
-          // keep none by default; Amazon recalculates variations from page
-          // Add keys here if you find necessary cases (e.g., 'th','psc')
-        ]);
-        this.stripParams(u, allowed, /* preserveCase */ false);
+        // For canonical product URLs, aggressively remove ALL query parameters.
+        // No parameters are needed for the page to load correctly.
+        u.search = "";
+        u.hash = "";
         return;
       }
 
       // For general Amazon links (search, lists), strip marketing trash
       // but preserve essential search intent.
       const allowed = new Set([
+        // keep only intent parameters for search/browse
         "k", // search keywords
         "rh", // filters
         "bbn", // browse node
         "i", // department
+        "node", // node
       ]);
       this.stripParams(u, allowed, /* preserveCase*/ false);
     },
@@ -499,10 +499,18 @@
           toDelete.push(k);
           continue;
         }
-        // also kill empty params and obvious noise
+        // kill empty params and Amazon noise
         if (
           !inAllow &&
-          (v === "" || keyLC === "ref" || keyLC === "ref_src" || keyLC === "ref_url")
+          (v === "" ||
+            keyLC === "ref" ||
+            keyLC === "ref_src" ||
+            keyLC === "ref_url" ||
+            keyLC.startsWith("ref_") || // <- ref_*
+            keyLC === "_encoding" || // <- _encoding
+            keyLC.startsWith("pf_rd_") || // <- placements
+            keyLC.startsWith("pd_rd_") || // <- placements
+            keyLC === "content-id") // <- content block id
         ) {
           toDelete.push(k);
           continue;
@@ -513,6 +521,10 @@
       }
       // Remove trailing "ref" segments from path e.g., /dp/ASIN/ref=something
       u.pathname = u.pathname.replace(/\/ref=[^/]+$/i, "");
+      // Drop dangling '?' if nothing remains
+      if ([...u.searchParams.keys()].length === 0) {
+        u.search = "";
+      }
     },
 
     // Resolve known redirectors: if ?u= or ?url= present, replace with inner URL
@@ -643,6 +655,20 @@
       );
     },
 
+    // Intercept hover to clean links before user sees them
+    interceptHover() {
+      document.addEventListener(
+        "mouseover",
+        (e) => {
+          const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
+          if (a) {
+            this.rewriteElAttr(a, "href");
+          }
+        },
+        true,
+      );
+    },
+
     // Patch history API to clean pushState/replaceState URLs (SPA)
     interceptHistory() {
       const patch = (m) => {
@@ -707,6 +733,7 @@
         this.sweep(document);
       }
       this.interceptClicks();
+      this.interceptHover();
       this.interceptHistory();
       this.observeMutations();
       // Final pass on full load (late-injected links)
