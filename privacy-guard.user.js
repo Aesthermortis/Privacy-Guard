@@ -250,7 +250,14 @@
      * method against dynamically injected scripts.
      */
     interceptElementCreation() {
-      const originalCreateElement = document.prototype.createElement;
+      // Check for existence of Document and document to avoid errors in some environments
+      const hasCtor = typeof Document !== "undefined" && Document && Document.prototype;
+      const hasDoc = typeof document !== "undefined" && document;
+      const originalCreateElement =
+        (hasCtor && Document.prototype.createElement) || (hasDoc && document.createElement);
+      if (!originalCreateElement || !hasDoc) {
+        return;
+      }
       const self = this;
 
       // Patch only script element creation to avoid breaking other element types
