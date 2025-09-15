@@ -250,12 +250,13 @@
      * method against dynamically injected scripts.
      */
     interceptElementCreation() {
-      const originalCreateElement = document.createElement;
+      const originalCreateElement = document.prototype.createElement;
       const self = this;
 
+      // Patch only script element creation to avoid breaking other element types
       document.createElement = function (...args) {
-        const element = originalCreateElement.apply(this, args);
         const tagName = args[0] ? String(args[0]).toLowerCase() : "";
+        const element = originalCreateElement.apply(this, args);
 
         if (tagName === "script") {
           try {
@@ -423,20 +424,23 @@
       const originalOpen = XMLHttpRequest.prototype.open;
       const originalSend = XMLHttpRequest.prototype.send;
       const self = this; // Reference to PrivacyGuard object
+      const PRIVACY_GUARD_URL = Symbol("privacyGuardUrl");
 
       XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-        // Store the URL on the instance for `send` to check it.
-        this._privacyGuardUrl = url;
+        // Store URL on a non-enumerable, collision-proof key
+        try {
+          this[PRIVACY_GUARD_URL] = url;
+        } catch (_) {}
         originalOpen.apply(this, [method, url, ...rest]);
       };
 
       XMLHttpRequest.prototype.send = function (...args) {
-        if (this._privacyGuardUrl && self.shouldBlock(String(this._privacyGuardUrl))) {
-          console.debug("[Privacy Guard] Blocked XHR:", this._privacyGuardUrl);
+        if (this[PRIVACY_GUARD_URL] && self.shouldBlock(String(this[PRIVACY_GUARD_URL]))) {
+          console.debug("[Privacy Guard] Blocked XHR:", this[PRIVACY_GUARD_URL]);
           EventLog.push({
             kind: "xhr",
             reason: MODE.networkBlock,
-            url: String(this._privacyGuardUrl),
+            url: String(this[PRIVACY_GUARD_URL]),
           });
           // Emulate real network failure: dispatch 'error' and 'abort', then 'loadend'
           Promise.resolve().then(() => {
@@ -460,6 +464,11 @@
      * Initializes all privacy-enhancing features.
      */
     init() {
+      if (this._initialized) {
+        return;
+      }
+      this._initialized = true;
+
       // Script interception (strategy selectable)
       if (CONFIG.scriptBlockMode === "createElement") {
         this.interceptElementCreation();
