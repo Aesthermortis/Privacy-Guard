@@ -208,7 +208,7 @@
         if (u.hostname === location.hostname) {
           return false;
         }
-      } catch (_) {
+      } catch {
         /* ignore */
       }
 
@@ -229,17 +229,17 @@
     removeNode(node, reason) {
       try {
         node.remove();
-      } catch (_) {
+      } catch {
         /* ignore */
       }
       try {
         EventLog.push({ kind: "remove", reason, url: node.src || "" });
-      } catch (_) {
+      } catch {
         /* ignore */
       }
       try {
         console.debug(`[Privacy Guard] Blocked and removed ${reason}:`, node.src || "");
-      } catch (_) {
+      } catch {
         /* ignore */
       }
     },
@@ -280,7 +280,7 @@
                   }
                   // Set the original value (or let it be handled by the neutralized type)
                   element.setAttribute("src", value);
-                } catch (_) {
+                } catch {
                   element.setAttribute("src", value);
                 }
               },
@@ -288,7 +288,7 @@
                 return element.getAttribute("src");
               },
             });
-          } catch (_) {
+          } catch {
             /* ignore */
           }
         }
@@ -302,13 +302,19 @@
     neutralizeScript(el) {
       try {
         el.type = "text/plain";
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
       try {
         el.removeAttribute("nonce");
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
       try {
         this.removeNode(el, "script");
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
     },
 
     /**
@@ -437,7 +443,9 @@
         // Store URL on a non-enumerable, collision-proof key
         try {
           this[PRIVACY_GUARD_URL] = url;
-        } catch (_) {}
+        } catch {
+          /* ignore */
+        }
         originalOpen.apply(this, [method, url, ...rest]);
       };
 
@@ -453,13 +461,19 @@
           Promise.resolve().then(() => {
             try {
               this.dispatchEvent(new ProgressEvent("error"));
-            } catch (_) {}
+            } catch {
+              /* ignore */
+            }
             try {
               this.dispatchEvent(new ProgressEvent("abort"));
-            } catch (_) {}
+            } catch {
+              /* ignore */
+            }
             try {
               this.dispatchEvent(new Event("loadend"));
-            } catch (_) {}
+            } catch {
+              /* ignore */
+            }
           });
           return;
         }
@@ -788,11 +802,11 @@
             if (target) {
               try {
                 return new URL(target);
-              } catch (_) {
+              } catch {
                 // sometimes the value is encoded twice
                 try {
                   return new URL(decodeURIComponent(target));
-                } catch (_) {
+                } catch {
                   /* ignore */
                 }
               }
@@ -825,7 +839,7 @@
       let u;
       try {
         u = new URL(input, base);
-      } catch (_) {
+      } catch {
         return input; // non-URL or malformed
       }
 
@@ -883,7 +897,7 @@
             return bits.join(" ");
           })
           .join(", ");
-      } catch (_) {
+      } catch {
         return srcset;
       }
     },
@@ -891,7 +905,9 @@
     hardenAnchor(a) {
       try {
         a.removeAttribute("ping");
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
       try {
         const rel = (a.getAttribute("rel") || "").toLowerCase();
         const parts = new Set(rel.split(/\s+/).filter(Boolean));
@@ -899,7 +915,7 @@
         parts.add("noopener");
         parts.add("noreferrer");
         a.setAttribute("rel", Array.from(parts).join(" "));
-      } catch (_) {
+      } catch {
         /* ignore */
       }
     },
@@ -934,7 +950,9 @@
         if (cleaned !== href) {
           linkEl.setAttribute("href", cleaned);
         }
-      } catch (_) {}
+      } catch {
+        /* ignore */
+      }
     },
 
     // Rewrite a single element in-place if attribute exists
@@ -1098,13 +1116,13 @@
               if (typeof url === "string") {
                 url = URLCleaner.cleanHref(url);
               }
-            } catch (_) {
+            } catch {
               /* ignore */
             }
             return _open.call(window, url, name, specs);
           };
         }
-      } catch (_) {
+      } catch {
         /* ignore */
       }
       try {
@@ -1117,7 +1135,7 @@
               if (typeof url === "string") {
                 url = URLCleaner.cleanHref(url);
               }
-            } catch (_) {
+            } catch {
               /* ignore */
             }
             return _assign.call(this, url);
@@ -1130,13 +1148,13 @@
               if (typeof url === "string") {
                 url = URLCleaner.cleanHref(url);
               }
-            } catch (_) {
+            } catch {
               /* ignore */
             }
             return _replace.call(this, url);
           };
         }
-      } catch (_) {
+      } catch {
         /* ignore */
       }
     },
@@ -1376,7 +1394,7 @@
             UIPanel.toggle();
             return;
           }
-        } catch (_) {
+        } catch {
           /* ignore */
         }
       },
