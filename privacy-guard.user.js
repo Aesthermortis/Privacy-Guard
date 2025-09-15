@@ -603,10 +603,88 @@
   };
 
   /**
-   * --- DOM/SPA Integration for Cleaning --------------------------------------
-   * Rewrites href/src/action when discovered or on navigation.
+   * URL Cleaning Runtime
+   * Handles DOM interactions and SPA navigation for URL cleaning.
+   * Applies to <a href>, <img src>, and <form action>.
    */
   const URLCleaningRuntime = {
+    /**
+     * Cleans up a srcset string by normalizing URLs.
+     * @param {string} srcset - The srcset attribute value.
+     * @returns {string} - The cleaned srcset attribute value.
+     */
+    cleanSrcset(srcset) {
+      if (!srcset || typeof srcset !== "string") {
+        return srcset;
+      }
+      try {
+        return srcset
+          .split(",")
+          .map((part) => {
+            const bits = part.trim().split(/\s+/);
+            const url = bits[0];
+            if (!url) {
+              return part;
+            }
+            const cleaned = URLCleaner.cleanHref(url);
+            bits[0] = cleaned;
+            return bits.join(" ");
+          })
+          .join(", ");
+      } catch (_) {
+        return srcset;
+      }
+    },
+
+    hardenAnchor(a) {
+      try {
+        a.removeAttribute("ping");
+      } catch (_) {}
+      try {
+        const rel = (a.getAttribute("rel") || "").toLowerCase();
+        const parts = new Set(rel.split(/\s+/).filter(Boolean));
+        // Add noopener and noreferrer to prevent leaking referrer and window.opener
+        parts.add("noopener");
+        parts.add("noreferrer");
+        a.setAttribute("rel", Array.from(parts).join(" "));
+      } catch (_) {
+        /* ignore */
+      }
+    },
+
+    maybeNeutralizeLinkEl(linkEl) {
+      try {
+        const relRaw = (linkEl.getAttribute("rel") || "").toLowerCase();
+        const rels = new Set(relRaw.split(/\s+/).filter(Boolean));
+        const TRACKING_RELS = new Set(["preconnect", "dns-prefetch", "prefetch", "prerender"]);
+        let hasTrackingRel = false;
+        for (const r of rels) {
+          if (TRACKING_RELS.has(r)) {
+            hasTrackingRel = true;
+            break;
+          }
+        }
+        if (!hasTrackingRel) {
+          return;
+        }
+        const href = linkEl.getAttribute("href") || "";
+        if (!href) {
+          linkEl.remove();
+          return;
+        }
+        // if it points to a blocked domain, remove it
+        if (PrivacyGuard.shouldBlock(href)) {
+          linkEl.remove();
+          return;
+        }
+        // if not blocked, at least clean the href
+        const cleaned = URLCleaner.cleanHref(href);
+        if (cleaned !== href) {
+          linkEl.setAttribute("href", cleaned);
+        }
+      } catch (_) {}
+    },
+
     // Rewrite a single element in-place if attribute exists
     rewriteElAttr(el, attr) {
       const val = el.getAttribute(attr);
@@ -626,18 +704,30 @@
         return;
       }
       // Only scan relevant elements
-      root.querySelectorAll("a[href], img[src], form[action]").forEach((el) => {
-        if (el.dataset.privacyGuardCleaned === "1") {
-          return;
-        }
-        if (el.tagName === "A") {
-          this.rewriteElAttr(el, "href");
-        } else if (el.tagName === "IMG") {
-          this.rewriteElAttr(el, "src");
-        } else if (el.tagName === "FORM") {
-          this.rewriteElAttr(el, "action");
-        }
-      });
+      root
+        .querySelectorAll("a[href], img[src], img[srcset], form[action], link[rel][href]")
+        .forEach((el) => {
+          if (el.dataset.privacyGuardCleaned === "1") {
+            return;
+          }
+          if (el.tagName === "A") {
+            this.rewriteElAttr(el, "href");
+            this.hardenAnchor(el);
+          } else if (el.tagName === "IMG") {
+            this.rewriteElAttr(el, "src");
+            if (el.hasAttribute("srcset")) {
+              const before = el.getAttribute("srcset") || "";
+              const after = this.cleanSrcset(before);
+              if (after !== before) {
+                el.setAttribute("srcset", after);
+              }
+            }
+          } else if (el.tagName === "FORM") {
+            this.rewriteElAttr(el, "action");
+          } else if (el.tagName === "LINK") {
+            this.maybeNeutralizeLinkEl(el);
+          }
+        });
     },
 
     // Intercept clicks to ensure last-moment cleaning (covers dynamic href)
@@ -710,7 +800,10 @@
           m.addedNodes.forEach((n) => {
             if (n && n.nodeType === Node.ELEMENT_NODE) {
               // Clean the node itself if it is relevant
-              if (n.matches && n.matches("a[href],img[src],form[action]")) {
+              if (
+                n.matches &&
+                n.matches("a[href],img[src],img[srcset],form[action],link[rel][href]")
+              ) {
                 this.sweep(n);
               } else {
                 // Or scan its children (bounded)
@@ -723,7 +816,10 @@
             if (
               m.attributeName === "href" ||
               m.attributeName === "src" ||
-              m.attributeName === "action"
+              m.attributeName === "srcset" ||
+              m.attributeName === "action" ||
+              m.attributeName === "rel" ||
+              m.attributeName === "ping"
             ) {
               this.sweep(t);
             }
@@ -735,8 +831,62 @@
         childList: true,
         subtree: true,
         attributes: true,
-        attributeFilter: ["href", "src", "action"],
+        attributeFilter: ["href", "src", "srcset", "action", "rel", "ping"],
       });
+    },
+
+    // Intercept navigations triggered via JS APIs to ensure cleaned URLs
+    interceptNavigation() {
+      try {
+        // window.open
+        const _open = window.open;
+        if (_open) {
+          window.open = function (url, name, specs) {
+            try {
+              if (typeof url === "string") {
+                url = URLCleaner.cleanHref(url);
+              }
+            } catch (_) {
+              /* ignore */
+            }
+            return _open.call(window, url, name, specs);
+          };
+        }
+      } catch (_) {
+        /* ignore */
+      }
+      try {
+        // location.assign / replace
+        const locationPrototype = Object.getPrototypeOf(location);
+        if (locationPrototype && locationPrototype.assign) {
+          const _assign = locationPrototype.assign;
+          locationPrototype.assign = function (url) {
+            try {
+              if (typeof url === "string") {
+                url = URLCleaner.cleanHref(url);
+              }
+            } catch (_) {
+              /* ignore */
+            }
+            return _assign.call(this, url);
+          };
+        }
+        if (locationPrototype && locationPrototype.replace) {
+          const _replace = locationPrototype.replace;
+          locationPrototype.replace = function (url) {
+            try {
+              if (typeof url === "string") {
+                url = URLCleaner.cleanHref(url);
+              }
+            } catch (_) {
+              /* ignore */
+            }
+            return _replace.call(this, url);
+          };
+        }
+      } catch (_) {
+        /* ignore */
+      }
     },
 
     init() {
@@ -751,6 +901,7 @@
       this.interceptHover();
       this.interceptHistory();
       this.observeMutations();
+      this.interceptNavigation();
       // Final pass on full load (late-injected links)
       window.addEventListener("load", () => this.sweep(document));
     },
