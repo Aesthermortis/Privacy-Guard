@@ -1,0 +1,24 @@
+# Output folders
+dist/
+out/
+build/
+
+# Node modules
+node_modules/
+
+# Config, lockfiles y dependencias
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Archivos de configuración de herramientas
+coverage/
+*.log
+
+# Otros archivos generados
+*.min.js
+*.bundle.js
+*.map
+
+# VSCode settings
+.vscode/

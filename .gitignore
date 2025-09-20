@@ -1,0 +1,35 @@
+# === OS / Editor ===
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
+.idea/
+.vscode/
+.history/
+*.code-workspace
+
+# === Node / Tooling ===
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# === Caches ===
+.eslintcache
+.rollup.cache
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
+
+# === Entorno / Secretos ===
+.env
+.env.*
+!.env.example
+
+# === Build (Rollup/JS) ===
+dist/
