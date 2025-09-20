@@ -66,21 +66,21 @@
           return null;
         }
         return JSON.parse(raw);
-      } catch (e) {
+      } catch {
         return null;
       }
     },
     set(hostname, obj) {
       try {
         localStorage.setItem(this.keyFor(hostname), JSON.stringify(obj));
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     },
     remove(hostname) {
       try {
         localStorage.removeItem(this.keyFor(hostname));
-      } catch (e) {
+      } catch {
         /* ignore */
       }
     },
@@ -105,7 +105,7 @@
   // Apply at boot using current document host
   try {
     applyOverridesForHost(location.hostname);
-  } catch (e) {
+  } catch {
     /* ignore */
   }
 
@@ -1340,7 +1340,6 @@
             return;
           }
           if (t.classList.contains("pg-save")) {
-            const o = STORAGE.get(location.hostname) || {};
             const nb = root.querySelector(".pg-nb");
             const sbm = root.querySelector(".pg-sbm");
             const en = root.querySelector(".pg-enable");
