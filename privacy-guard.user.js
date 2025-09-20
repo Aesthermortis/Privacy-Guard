@@ -961,9 +961,46 @@
       if (!val) {
         return;
       }
+
+      // Skip if already processed to avoid redundant operations
+      if (el.dataset.privacyGuardCleaned === "1") {
+        return;
+      }
+
       const cleaned = URLCleaner.cleanHref(val);
+
+      // Only modify if there's an actual change
       if (cleaned && cleaned !== val) {
+        // Additional safety: preserve existing data attributes and classes
+        const existingDataAttrs = {};
+        const existingClasses = el.className;
+
+        // Capture existing data-* attributes before modification
+        for (const dataAttr of el.attributes) {
+          if (dataAttr.name.startsWith("data-") && dataAttr.name !== "data-privacy-guard-cleaned") {
+            existingDataAttrs[dataAttr.name] = dataAttr.value;
+          }
+        }
+
+        // Apply the cleaned URL
         el.setAttribute(attr, cleaned);
+
+        // Restore any data attributes that might have been affected
+        Object.entries(existingDataAttrs).forEach(([name, value]) => {
+          if (el.getAttribute(name) !== value) {
+            el.setAttribute(name, value);
+          }
+        });
+
+        // Restore classes if they were modified
+        if (el.className !== existingClasses && existingClasses) {
+          el.className = existingClasses;
+        }
+
+        // Mark as processed
+        el.dataset.privacyGuardCleaned = "1";
+      } else if (cleaned === val) {
+        // Even if no change, mark as processed to avoid future checks
         el.dataset.privacyGuardCleaned = "1";
       }
     },
