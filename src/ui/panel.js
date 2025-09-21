@@ -16,6 +16,17 @@ export function setupUIPanel() {
     function ensureCss() {
       injectCSS("pg-style", panelStyles);
     }
+    function escapeHtml(value) {
+      if (value === null || value === undefined) {
+        return "";
+      }
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
 
     function view() {
       const overrides = STORAGE.get(location.hostname) || { enabled: true };
@@ -60,12 +71,12 @@ export function setupUIPanel() {
             }</span></div>
             ${list
               .slice(0, 25)
-              .map(
-                (e) =>
-                  `<div class="pg-log-item"><b>${e.kind}</b> <span class="pg-muted">${new Date(
-                    e.time,
-                  ).toLocaleTimeString()}</span><div>${e.url || ""}</div></div>`,
-              )
+              .map((event) => {
+                const kind = escapeHtml(event.kind);
+                const time = new Date(event.time).toLocaleTimeString();
+                const url = escapeHtml(event.url);
+                return `<div class="pg-log-item"><b>${kind}</b> <span class="pg-muted">${time}</span><div>${url}</div></div>`;
+              })
               .join("")}
           </div>
         `;
