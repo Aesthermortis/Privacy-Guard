@@ -1,0 +1,16 @@
+// ==UserScript==
+// @name         Privacy Guard
+// @namespace    com.aesthermortis.privacy-guard
+// @version      __VERSION__
+// @description  A UserScript to enhance privacy by blocking trackers and analytics.
+// @author       Aesthermortis
+// @match        *://*/*
+// @icon         data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path fill='%231D4ED8' d='M32 6c8 4 16 4 20 6v16c0 12-8 22-20 30C20 50 12 40 12 28V12c4-2 12-2 20-6z'/><rect x='22' y='28' width='20' height='16' rx='3' fill='white' opacity='0.95'/><path d='M25 28v-3a7 7 0 0114 0v3' stroke='%230F172A' stroke-width='3' fill='none'/><circle cx='32' cy='36' r='3' fill='%230F172A'/><rect x='31' y='39' width='2' height='4' rx='1' fill='%230F172A'/></svg>
+// @run-at       document-start
+// @grant        none
+// @license      MIT
+// @downloadURL  https://github.com/Aesthermortis/privacy-guard/releases/latest/download/privacy-guard.user.js
+// @updateURL    https://github.com/Aesthermortis/privacy-guard/releases/latest/download/privacy-guard.user.js
+// @supportURL   https://github.com/Aesthermortis/privacy-guard/issues
+// @homepageURL  https://github.com/Aesthermortis/privacy-guard
+// ==/UserScript==
