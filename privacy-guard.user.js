@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Privacy Guard
 // @namespace    com.aesthermortis.privacy-guard
-// @version      1.4.0
+// @version      __VERSION__
 // @description  A UserScript to enhance privacy by blocking trackers and analytics.
 // @author       Aesthermortis
 // @match        *://*/*
@@ -834,11 +834,33 @@
       }
     },
 
+    resolveBase(base) {
+      try {
+        if (base) {
+          return base;
+        }
+        if (typeof document !== "undefined" && document.baseURI) {
+          return document.baseURI;
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        if (typeof location !== "undefined" && location.href) {
+          return location.href;
+        }
+      } catch {
+        /* ignore */
+      }
+      return undefined;
+    },
+
     // Main entry: returns cleaned href as string
-    cleanHref(input, base = location.href) {
+    cleanHref(input, base) {
+      const resolvedBase = this.resolveBase(base);
       let u;
       try {
-        u = new URL(input, base);
+        u = resolvedBase ? new URL(input, resolvedBase) : new URL(input);
       } catch {
         return input; // non-URL or malformed
       }
@@ -946,7 +968,7 @@
           return;
         }
         // if not blocked, at least clean the href
-        const cleaned = URLCleaner.cleanHref(href);
+        const cleaned = URLCleaner.cleanHref(href, linkEl.baseURI);
         if (cleaned !== href) {
           linkEl.setAttribute("href", cleaned);
         }
@@ -967,7 +989,7 @@
         return;
       }
 
-      const cleaned = URLCleaner.cleanHref(val);
+      const cleaned = URLCleaner.cleanHref(val, el.baseURI);
 
       // Only modify if there's an actual change
       if (cleaned && cleaned !== val) {
