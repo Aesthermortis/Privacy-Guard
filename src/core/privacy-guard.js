@@ -120,6 +120,120 @@ export const PrivacyGuard = {
   },
 
   /**
+   * Hardens script insertion by intercepting various DOM methods and properties
+   * to prevent blocked scripts from being added or executed.
+   * Intercepts setAttribute, property setters, and DOM insertion methods for <script> elements.
+   * No parameters.
+   * @returns {void}
+   */
+  hardenScriptInsertion() {
+    if (this._scriptHardeningApplied) {
+      return;
+    }
+    this._scriptHardeningApplied = true;
+    const guard = this;
+
+    // Intercept attribute-based assignment
+    const elementProto = typeof Element !== "undefined" ? Element.prototype : null;
+    if (elementProto && elementProto.setAttribute) {
+      const originalSetAttribute = elementProto.setAttribute;
+      elementProto.setAttribute = function (name, value) {
+        try {
+          if (
+            this &&
+            typeof this.tagName === "string" &&
+            this.tagName.toUpperCase() === "SCRIPT" &&
+            typeof name === "string" &&
+            name.toLowerCase() === "src"
+          ) {
+            if (guard.shouldBlock(value)) {
+              const blockedUrl = String(value);
+              guard.neutralizeScript(this);
+              try {
+                EventLog.push({ kind: "script", reason: "setAttribute", url: blockedUrl });
+              } catch {
+                /* ignore */
+              }
+              return;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return originalSetAttribute.call(this, name, value);
+      };
+    }
+
+    // Intercept property-based assignment at prototype level
+    const scriptProto =
+      typeof HTMLScriptElement !== "undefined" && HTMLScriptElement
+        ? HTMLScriptElement.prototype
+        : null;
+    if (scriptProto) {
+      const descriptor = Object.getOwnPropertyDescriptor(scriptProto, "src");
+      if (descriptor && typeof descriptor.set === "function") {
+        Object.defineProperty(scriptProto, "src", {
+          configurable: true,
+          enumerable: descriptor.enumerable,
+          get: descriptor.get,
+          set(value) {
+            try {
+              if (guard.shouldBlock(value)) {
+                const blockedUrl = String(value);
+                guard.neutralizeScript(this);
+                try {
+                  EventLog.push({ kind: "script", reason: "prop:set", url: blockedUrl });
+                } catch {
+                  /* ignore */
+                }
+                return;
+              }
+            } catch {
+              /* ignore */
+            }
+            descriptor.set.call(this, value);
+          },
+        });
+      }
+    }
+
+    // Intercept node insertion to inspect detached SCRIPTs
+    const intercept = (Proto, method) => {
+      if (!Proto || !Proto.prototype) {
+        return;
+      }
+      const original = Proto.prototype[method];
+      if (typeof original !== "function") {
+        return;
+      }
+      Proto.prototype[method] = function (node, ...rest) {
+        try {
+          if (node && typeof node.tagName === "string" && node.tagName.toUpperCase() === "SCRIPT") {
+            const blockedUrl = node.getAttribute("src") || node.src || "";
+            if (guard.shouldBlock(blockedUrl)) {
+              guard.neutralizeScript(node);
+              try {
+                EventLog.push({ kind: "script", reason: "dom:" + method, url: String(blockedUrl) });
+              } catch {
+                /* ignore */
+              }
+              return node;
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return original.call(this, node, ...rest);
+      };
+    };
+
+    if (typeof Node !== "undefined" && Node && Node.prototype) {
+      intercept(Node, "appendChild");
+      intercept(Node, "insertBefore");
+    }
+  },
+
+  /**
    * Neutralize a <script> element safely (prevents execution).
    */
   neutralizeScript(el) {
@@ -318,6 +432,7 @@ export const PrivacyGuard = {
     if (CONFIG.scriptBlockMode === "createElement") {
       this.interceptElementCreation();
     }
+    this.hardenScriptInsertion();
 
     // Start observing DOM immediately
     this.observeDOMChanges();
