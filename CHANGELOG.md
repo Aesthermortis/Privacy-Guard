@@ -1,3 +1,15 @@
+## [1.6.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.0...v1.6.1) (2025-09-22)
+
+### Bug Fixes
+
+* **build:** inject semantic-release version into Rollup to prevent 1.0.0 fallback ([a491b77](https://github.com/Aesthermortis/Privacy-Guard/commit/a491b7764d9e689e4c8ddd82a42761a0e8746fa3))
+* **release:** prevent metadata.txt mutation and clean up release config ([fce1a49](https://github.com/Aesthermortis/Privacy-Guard/commit/fce1a49359510f72195f87c10b5dbb653d0b791b))
+* **url-cleaner:** restrict share param removal to YouTube ([6cfb3aa](https://github.com/Aesthermortis/Privacy-Guard/commit/6cfb3aac7c43ceaebc648876c52cbb298ce3f95a))
+
+### Reverts
+
+* Revert "fix(userscript): hardcode version in metadata" ([46cbae5](https://github.com/Aesthermortis/Privacy-Guard/commit/46cbae53da3f04d8a5f2a50847c76aabfa048e26))
+
 ## [1.6.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.5.0...v1.6.0) (2025-09-22)
 
 ### Features
