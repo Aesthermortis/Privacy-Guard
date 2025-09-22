@@ -7,7 +7,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "npm run build"
+        "prepareCmd": "USERSCRIPT_VERSION=${nextRelease.version} npm run build && node -e \"const fs=require('fs');const v='${nextRelease.version}';const s=fs.readFileSync('dist/privacy-guard.user.js','utf8');if(!/^\\/\\/\\s*@version\\s+${nextRelease.version}/m.test(s)){throw new Error('Version mismatch in dist: expected '+v);}\""
       }
     ],
     [

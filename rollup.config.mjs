@@ -4,8 +4,80 @@ import { dirname, resolve } from "node:path";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-let metadata = readFileSync(resolve(__dirname, "src", "metadata.txt"), "utf8");
 
+/**
+ * Reads the userscript metadata banner.
+ * @returns {string} The metadata block for the userscript.
+ */
+const getMetadata = () => {
+  return readFileSync(resolve(__dirname, "src", "metadata.txt"), "utf8");
+};
+
+/**
+ * Gets the version from the environment variable.
+ * @returns {string} The version from the environment variable, or empty string if not found.
+ */
+const getVersionFromEnv = () => (process.env.USERSCRIPT_VERSION || "").trim();
+
+/**
+ * Extracts the version from the GitHub Actions tag if present.
+ * @returns {string} The version from the tag (e.g. '1.6.1'), or empty string if not found.
+ */
+const getVersionFromTag = () => {
+  const refName = process.env.GITHUB_REF_NAME || "";
+  return refName.startsWith("v") ? refName.slice(1) : "";
+};
+
+/**
+ * Reads the version from package.json.
+ * @returns {string} The version from package.json, or '0.0.0' as fallback.
+ */
+const getVersionFromPackage = () => {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
+    return pkg.version || "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+};
+
+/**
+ * Inserts the resolved version into the userscript metadata banner.
+ * @param {string} banner - The original metadata banner.
+ * @param {string} version - The version to inject.
+ * @returns {string} The updated metadata banner.
+ */
+const injectVersionIntoBanner = (banner, version) => {
+  // Simple semver validation: major.minor.patch with optional pre-release/build
+  const semverRegex = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
+  if (!version || !semverRegex.test(version)) {
+    throw new Error("❌ No valid version found for userscript metadata.");
+  }
+
+  // Match the typical metadata line: "// @version    <optional value>"
+  const lineRegex = /(^[ \t]*\/\/[ \t]*@version[ \t]+)([^\r\n]*)/m;
+
+  if (!lineRegex.test(banner)) {
+    throw new Error("❌ No @version line found in userscript metadata banner.");
+  }
+
+  // Ensure there's only one @version line
+  const occurrences = banner.match(/^[ \t]*\/\/[ \t]*@version[ \t]+/gm);
+  if (occurrences && occurrences.length > 1) {
+    throw new Error("Multiple @version lines found in metadata banner.");
+  }
+
+  return banner.replace(lineRegex, `$1${version}`);
+};
+
+// Determine the version to use, prioritizing environment variable, then Git tag, then package.json
+const resolvedVersion = getVersionFromEnv() || getVersionFromTag() || getVersionFromPackage();
+const metadata = injectVersionIntoBanner(getMetadata(), resolvedVersion);
+
+/**
+ * Rollup plugin to import CSS as JS strings.
+ * @type {import('rollup').Plugin}
+ */
 const cssAsStringPlugin = {
   name: "css-as-string",
   transform(code, id) {
@@ -18,29 +90,6 @@ const cssAsStringPlugin = {
     };
   },
 };
-
-// Get version from workflow tag (refs/tags/vX.Y.Z)
-const fromTag = process.env.GITHUB_REF_NAME || ""; // e.g. "v3.2.1"
-const tagVersion = fromTag.startsWith("v") ? fromTag.slice(1) : "";
-
-// Fallbacks: if running locally without tag, try package.json, or use "0.0.0"
-let pkgVersion = "0.0.0";
-try {
-  const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
-  pkgVersion = pkg.version || pkgVersion;
-} catch {}
-
-const version = tagVersion || pkgVersion;
-
-// Ensure metadata banner uses the resolved version
-const updateMetadataVersion = (banner, bannerVersion) => {
-  if (!bannerVersion) {
-    return banner;
-  }
-  return banner.replace(/(@version\s+)([^\r\n]+)/, `$1${bannerVersion}`);
-};
-
-metadata = updateMetadataVersion(metadata, version);
 
 export default {
   input: "src/index.js",
