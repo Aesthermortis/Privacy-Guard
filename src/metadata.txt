@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Privacy Guard
 // @namespace    com.aesthermortis.privacy-guard
-// @version      1.6.0
+// @version      __VERSION__
 // @description  A UserScript to enhance privacy by blocking trackers and analytics.
 // @author       Aesthermortis
 // @match        *://*/*
