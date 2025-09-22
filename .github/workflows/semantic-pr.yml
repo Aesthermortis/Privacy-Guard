@@ -1,4 +1,6 @@
 name: Semantic Pull Request
+permissions:
+  contents: read
 
 on:
   pull_request:
