@@ -10,7 +10,8 @@
     "test": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js",
     "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
     "release": "semantic-release",
-    "prepare": "husky"
+    "prepare": "husky",
+    "audit": "npm audit fix"
   },
   "lint-staged": {
     "*.{js,mjs,json}": [
