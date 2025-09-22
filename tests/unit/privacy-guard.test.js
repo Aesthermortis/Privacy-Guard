@@ -1,9 +1,9 @@
 import { jest } from "@jest/globals";
-import { PrivacyGuard } from "./privacy-guard.js";
-import { EventLog } from "../event-log.js";
-import { CONFIG } from "../config.js";
-import { BLOCKED_RULES } from "../blocklist.js";
-import { URLCleaner } from "../url/cleaner.js";
+import { PrivacyGuard } from "../../src/core/privacy-guard.js";
+import { EventLog } from "../../src/event-log.js";
+import { CONFIG } from "../../src/config.js";
+import { BLOCKED_RULES } from "../../src/blocklist.js";
+import { URLCleaner } from "../../src/url/cleaner.js";
 
 describe("PrivacyGuard.shouldBlock", () => {
   let originalAllowSameOrigin;
@@ -114,3 +114,4 @@ describe("PrivacyGuard.neutralizeScript", () => {
     expect(script.isConnected).toBe(false);
   });
 });
+
