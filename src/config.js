@@ -14,6 +14,7 @@ export const MODE = {
 
 export const CONFIG = {
   scriptBlockMode: "createElement", // "createElement" | "observer"
+  allowSameOrigin: false, // block same-origin trackers unless explicitly allowed
 };
 
 export function applyOverridesForHost(hostname, storage) {
@@ -29,5 +30,8 @@ export function applyOverridesForHost(hostname, storage) {
   }
   if (overrides.scriptBlockMode === "createElement" || overrides.scriptBlockMode === "observer") {
     CONFIG.scriptBlockMode = overrides.scriptBlockMode;
+  }
+  if (typeof overrides.allowSameOrigin === "boolean") {
+    CONFIG.allowSameOrigin = overrides.allowSameOrigin;
   }
 }

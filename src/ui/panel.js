@@ -32,6 +32,7 @@ export function setupUIPanel() {
       const overrides = STORAGE.get(location.hostname) || { enabled: true };
       const networkBlock = overrides.networkBlock || MODE.networkBlock;
       const scriptBlockMode = overrides.scriptBlockMode || CONFIG.scriptBlockMode;
+      const allowSameOrigin = overrides.allowSameOrigin ?? CONFIG.allowSameOrigin;
       const list = EventLog.list();
       const html = `
           <div class="pg-row"><span class="pg-title">Privacy Guard</span><span class="pg-chip">${
@@ -61,6 +62,7 @@ export function setupUIPanel() {
               </select>
             </div>
           </div>
+          <div class="pg-row"><label><input type="checkbox" class="pg-aso" ${allowSameOrigin ? "checked" : ""}/> Allow same-origin scripts</label><span class="pg-muted pg-right">Reduces privacy</span></div>
           <div class="pg-row"><label><input type="checkbox" class="pg-enable" ${
             overrides.enabled !== false ? "checked" : ""
           }/> Enable overrides for this domain</label></div>
@@ -107,10 +109,12 @@ export function setupUIPanel() {
           const nb = root.querySelector(".pg-nb");
           const sbm = root.querySelector(".pg-sbm");
           const enabled = root.querySelector(".pg-enable");
+          const aso = root.querySelector(".pg-aso");
           const next = {
             enabled: enabled && enabled.checked ? true : false,
             networkBlock: nb && nb.value ? nb.value : MODE.networkBlock,
             scriptBlockMode: sbm && sbm.value ? sbm.value : CONFIG.scriptBlockMode,
+            allowSameOrigin: aso && aso.checked ? true : false,
           };
           STORAGE.set(location.hostname, next);
           applyOverridesForHost(location.hostname, STORAGE);

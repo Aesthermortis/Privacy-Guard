@@ -25,10 +25,10 @@ export const PrivacyGuard = {
       }
     }
 
-    // Never block the current origin (same host)
+    // Optionally allow same-origin requests when configured
     try {
       const u = new URL(urlString, location.href);
-      if (u.hostname === location.hostname) {
+      if (CONFIG.allowSameOrigin && u.hostname === location.hostname) {
         return false;
       }
     } catch {
