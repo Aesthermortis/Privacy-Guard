@@ -185,6 +185,10 @@ export const URLCleaner = {
     if (u.pathname === "/watch") {
       const allow = new Set(["v", "t", "list", "index"]);
       this.stripParams(u, allow, false);
+      const shareParams = ["si", "pp", "feature", "ab_channel"];
+      for (const name of shareParams) {
+        u.searchParams.delete(name);
+      }
       // Normalize host
       u.hostname = "www.youtube.com";
     }
@@ -252,11 +256,7 @@ export const URLCleaner = {
           keyLC === "_encoding" ||
           keyLC.startsWith("pf_rd_") ||
           keyLC.startsWith("pd_rd_") ||
-          keyLC === "content-id" ||
-          keyLC === "si" ||
-          keyLC === "pp" ||
-          keyLC === "feature" ||
-          keyLC === "ab_channel")
+          keyLC === "content-id")
       ) {
         toDelete.push(k);
         continue;

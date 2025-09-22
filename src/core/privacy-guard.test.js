@@ -3,6 +3,7 @@ import { PrivacyGuard } from "./privacy-guard.js";
 import { EventLog } from "../event-log.js";
 import { CONFIG } from "../config.js";
 import { BLOCKED_RULES } from "../blocklist.js";
+import { URLCleaner } from "../url/cleaner.js";
 
 describe("PrivacyGuard.shouldBlock", () => {
   let originalAllowSameOrigin;
@@ -60,6 +61,19 @@ describe("PrivacyGuard.shouldBlock", () => {
   test("allows non-tracker paths on the same host", () => {
     const url = "https://www.facebook.com/profile";
     expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+  });
+});
+
+describe("URLCleaner.cleanHref", () => {
+  test("keeps non-YouTube feature parameters", () => {
+    const href = "https://example.com/watch?feature=player";
+    expect(URLCleaner.cleanHref(href)).toBe("https://example.com/watch?feature=player");
+  });
+
+  test("strips YouTube share parameters", () => {
+    const href =
+      "https://www.youtube.com/watch?v=abc123&feature=share&ab_channel=TestChannel&si=foo&pp=some";
+    expect(URLCleaner.cleanHref(href)).toBe("https://www.youtube.com/watch?v=abc123");
   });
 });
 
