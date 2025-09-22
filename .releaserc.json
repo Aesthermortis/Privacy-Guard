@@ -7,7 +7,7 @@
     [
       "@semantic-release/exec",
       {
-        "prepareCmd": "node scripts/bump-userscript.js ${nextRelease.version} && npm run build"
+        "prepareCmd": "npm run build"
       }
     ],
     [
@@ -19,7 +19,7 @@
     [
       "@semantic-release/git",
       {
-        "assets": ["CHANGELOG.md", "src/metadata.txt"],
+        "assets": ["CHANGELOG.md"],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
     ]
