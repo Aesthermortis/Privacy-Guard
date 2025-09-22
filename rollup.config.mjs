@@ -32,8 +32,15 @@ try {
 
 const version = tagVersion || pkgVersion;
 
-// Replace marker in the banner
-metadata = metadata.replace("__VERSION__", version);
+// Ensure metadata banner uses the resolved version
+const updateMetadataVersion = (banner, bannerVersion) => {
+  if (!bannerVersion) {
+    return banner;
+  }
+  return banner.replace(/(@version\s+)([^\r\n]+)/, `$1${bannerVersion}`);
+};
+
+metadata = updateMetadataVersion(metadata, version);
 
 export default {
   input: "src/index.js",
