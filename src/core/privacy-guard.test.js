@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 import { PrivacyGuard } from "./privacy-guard.js";
 import { EventLog } from "../event-log.js";
 import { CONFIG } from "../config.js";
+import { BLOCKED_RULES } from "../blocklist.js";
 
 describe("PrivacyGuard.shouldBlock", () => {
   let originalAllowSameOrigin;
@@ -26,13 +27,38 @@ describe("PrivacyGuard.shouldBlock", () => {
   });
 
   test("blocks same-origin tracker URLs when allowSameOrigin is disabled", () => {
-    const url = `${location.origin}/google-analytics.com/tracker.js`;
-    expect(PrivacyGuard.shouldBlock(url)).toBe(true);
+    BLOCKED_RULES.push({ host: location.hostname, pathStartsWith: "/ga-tracker" });
+    try {
+      const url = `${location.origin}/ga-tracker/collect.js`;
+      expect(PrivacyGuard.shouldBlock(url)).toBe(true);
+    } finally {
+      BLOCKED_RULES.pop();
+    }
   });
 
   test("allows same-origin tracker URLs when allowSameOrigin is enabled", () => {
     CONFIG.allowSameOrigin = true;
-    const url = `${location.origin}/google-analytics.com/tracker.js`;
+    BLOCKED_RULES.push({ host: location.hostname, pathStartsWith: "/ga-tracker" });
+    try {
+      const url = `${location.origin}/ga-tracker/collect.js`;
+      expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+    } finally {
+      BLOCKED_RULES.pop();
+    }
+  });
+
+  test("ignores tracker hostnames that appear only in query parameters", () => {
+    const url = "https://example.com/page?next=https://google-analytics.com/collect";
+    expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+  });
+
+  test("blocks tracker paths defined in structured rules", () => {
+    const url = "https://www.facebook.com/plugins/like.php";
+    expect(PrivacyGuard.shouldBlock(url)).toBe(true);
+  });
+
+  test("allows non-tracker paths on the same host", () => {
+    const url = "https://www.facebook.com/profile";
     expect(PrivacyGuard.shouldBlock(url)).toBe(false);
   });
 });

@@ -1,9 +1,56 @@
 import { MODE, CONFIG } from "../config.js";
-import { BLOCKED_PATTERNS } from "../blocklist.js";
-import { ALLOWED_PATTERNS, ALLOWED_SCHEMES } from "../allowlists.js";
+import { BLOCKED_HOSTS, BLOCKED_RULES } from "../blocklist.js";
+import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js";
 import { EventLog } from "../event-log.js";
 import { URLCleaningRuntime, setShouldBlock } from "../url/runtime.js";
 
+function hostnameMatches(urlObj, patterns = []) {
+  if (!urlObj || !Array.isArray(patterns) || patterns.length === 0) {
+    return false;
+  }
+  const host = (urlObj.hostname || "").toLowerCase();
+  if (!host) {
+    return false;
+  }
+  return patterns.some((pattern) => {
+    if (!pattern) {
+      return false;
+    }
+    const pat = String(pattern).trim().toLowerCase();
+    if (!pat || pat === "*") {
+      return false;
+    }
+    if (pat.startsWith("*.")) {
+      const base = pat.slice(2);
+      if (!base) {
+        return false;
+      }
+      return host === base || host.endsWith(`.${base}`);
+    }
+    return host === pat || host.endsWith(`.${pat}`);
+  });
+}
+
+function urlMatches(urlObj, rules = []) {
+  if (!urlObj || !Array.isArray(rules) || rules.length === 0) {
+    return false;
+  }
+  return rules.some((rule) => {
+    if (!rule || !rule.host) {
+      return false;
+    }
+    if (!hostnameMatches(urlObj, [rule.host])) {
+      return false;
+    }
+    if (!rule.pathStartsWith) {
+      return true;
+    }
+    const prefix = rule.pathStartsWith.startsWith("/")
+      ? rule.pathStartsWith
+      : `/${rule.pathStartsWith}`;
+    return urlObj.pathname.startsWith(prefix);
+  });
+}
 export const PrivacyGuard = {
   /**
    * Checks if a given URL or src attribute matches any blocked pattern.
@@ -15,33 +62,36 @@ export const PrivacyGuard = {
       return false;
     }
 
-    // Convert to string to handle URL objects
     const urlString = String(url);
 
-    // Do not block internal/browser schemes
     for (const scheme of ALLOWED_SCHEMES) {
       if (urlString.startsWith(scheme)) {
         return false;
       }
     }
 
-    // Optionally allow same-origin requests when configured
+    let parsed;
     try {
-      const u = new URL(urlString, location.href);
-      if (CONFIG.allowSameOrigin && u.hostname === location.hostname) {
+      parsed = new URL(urlString, location.href);
+    } catch {
+      parsed = null;
+    }
+
+    if (parsed) {
+      if (hostnameMatches(parsed, ALLOWED_HOSTS) || urlMatches(parsed, ALLOWED_RULES)) {
         return false;
       }
-    } catch {
-      /* ignore */
+
+      if (CONFIG.allowSameOrigin && parsed.hostname === location.hostname) {
+        return false;
+      }
+
+      if (hostnameMatches(parsed, BLOCKED_HOSTS) || urlMatches(parsed, BLOCKED_RULES)) {
+        return true;
+      }
     }
 
-    // Whitelist check: if the URL matches an allowed pattern, do not block it.
-    if (ALLOWED_PATTERNS.some((pattern) => urlString.includes(pattern))) {
-      return false;
-    }
-
-    // Blacklist check: block if it matches a blocked pattern.
-    return BLOCKED_PATTERNS.some((pattern) => urlString.includes(pattern));
+    return false;
   },
 
   /**

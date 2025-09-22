@@ -1,5 +1,9 @@
-export const ALLOWED_PATTERNS = [
+export const ALLOWED_HOSTS = [
   // Add trusted domains here
+];
+
+export const ALLOWED_RULES = [
+  // { host: "example.com", pathStartsWith: "/allowed" }
 ];
 
 export const ALLOWED_SCHEMES = [
