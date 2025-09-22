@@ -1,3 +1,9 @@
+## [1.6.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.5.0...v1.6.0) (2025-09-22)
+
+### Features
+
+* **ui/panel:** add allowSameOrigin option to configuration panel ([813bc91](https://github.com/Aesthermortis/Privacy-Guard/commit/813bc91da147c222d091687754ec738325b83087))
+
 ## [1.5.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.4.1...v1.5.0) (2025-09-22)
 
 ### Features
