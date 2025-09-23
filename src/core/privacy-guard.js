@@ -343,23 +343,97 @@ export const PrivacyGuard = {
    * Starts as early as possible.
    */
   observeDOMChanges() {
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        mutation.addedNodes.forEach((node) => {
-          if (node && node.nodeType === Node.ELEMENT_NODE && node.tagName === "SCRIPT") {
-            const src = node.getAttribute("src") || "";
-            if (this.shouldBlock(src)) {
-              // Try to neutralize before execution
-              this.neutralizeScript(node);
-              return;
+    if (typeof MutationObserver !== "function" || !document) {
+      return;
+    }
+
+    const RELEVANT_SELECTOR = "script[src], iframe[src]";
+    const hasElementCtor = typeof Element === "function";
+    const pending = new Set();
+    let scheduled = false;
+
+    const schedule = () => {
+      const run = () => {
+        scheduled = false;
+        if (!pending.size) {
+          return;
+        }
+
+        const roots = [];
+        for (const node of pending) {
+          if (!hasElementCtor || !(node instanceof Element) || !node.isConnected) {
+            continue;
+          }
+          if (roots.some((existing) => existing.contains(node))) {
+            continue;
+          }
+          for (let i = roots.length - 1; i >= 0; i -= 1) {
+            if (node.contains(roots[i])) {
+              roots.splice(i, 1);
             }
           }
-          this.scanNodeForBlockedElements(node);
-        });
+          roots.push(node);
+        }
+
+        pending.clear();
+
+        if (!roots.length) {
+          return;
+        }
+
+        for (const root of roots) {
+          this.scanNodeForBlockedElements(root);
+        }
+
+        if (pending.size) {
+          schedule();
+        }
+      };
+
+      if ("requestIdleCallback" in window) {
+        requestIdleCallback(() => run(), { timeout: 50 });
+      } else {
+        requestAnimationFrame(() => run());
+      }
+    };
+
+    const collectNode = (node) => {
+      if (!hasElementCtor || !(node instanceof Element)) {
+        return;
+      }
+
+      if (node.tagName === "SCRIPT") {
+        const src = node.getAttribute("src") || "";
+        if (this.shouldBlock(src)) {
+          this.neutralizeScript(node);
+          return;
+        }
+      }
+
+      if (node.tagName === "IFRAME" && this.shouldBlock(node.src)) {
+        this.removeNode(node, "iframe");
+        return;
+      }
+
+      if (
+        node.matches(RELEVANT_SELECTOR) ||
+        (typeof node.querySelector === "function" && node.querySelector(RELEVANT_SELECTOR))
+      ) {
+        pending.add(node);
+      }
+
+      if (!scheduled && pending.size) {
+        scheduled = true;
+        schedule();
+      }
+    };
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        mutation.addedNodes?.forEach(collectNode);
       }
     });
 
-    // Observe as early as possible
     observer.observe(document.documentElement || document, {
       childList: true,
       subtree: true,
@@ -370,13 +444,11 @@ export const PrivacyGuard = {
    * Intercepts `fetch` requests to block trackers.
    */
   interceptFetch() {
-    // IMPORTANT: bind original fetch to window to avoid "Illegal invocation"
     const originalFetch = window.fetch ? window.fetch.bind(window) : null;
     if (!originalFetch) {
       return;
     }
     const guard = this;
-    // Use a normal function to keep a callable with a proper [[ThisMode]]
     window.fetch = function (...args) {
       const [input] = args;
       const url = typeof input === "string" ? input : input && input.url ? input.url : "";
@@ -385,18 +457,14 @@ export const PrivacyGuard = {
         console.debug("[Privacy Guard] Blocked fetch:", url);
         EventLog.push({ kind: "fetch", reason: MODE.networkBlock, url: String(url) });
         if (MODE.networkBlock === "silent") {
-          // Previous behavior (NOT recommended): may leave UIs in loading state.
           return Promise.resolve(new Response(null, { status: 204, statusText: "No Content" }));
-        } else {
-          // Emulate real network failure. Many apps already handle this case gracefully.
-          return Promise.reject(new TypeError("PrivacyGuard blocked: " + url));
         }
+        return Promise.reject(new TypeError("PrivacyGuard blocked: " + url));
       }
 
       return originalFetch(...args);
     };
   },
-
   /**
    * Intercepts `navigator.sendBeacon` calls.
    */
