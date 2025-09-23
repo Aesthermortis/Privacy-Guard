@@ -7,6 +7,10 @@ export const BLOCKED_HOSTS = [
   "googlesyndication.com",
   "imasdk.googleapis.com",
   "collector.github.com",
+  // Netpub ad/CDN
+  "fstatic.netpub.media",
+  // Dropbox telemetry
+  "beacon.dropbox.com",
 ];
 
 export const BLOCKED_RULES = [
@@ -19,5 +23,6 @@ export const BLOCKED_RULES = [
   { host: "chatgpt.com", pathStartsWith: "/ces/" },
   // Other common trackers
   { host: "overbridgenet.com", pathStartsWith: "/jsv8/offer" },
-  // Add more structured rules here
+  // Dropbox logs/telemetry
+  { host: "dropbox.com", pathStartsWith: "/log/" },
 ];
