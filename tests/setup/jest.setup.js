@@ -26,4 +26,3 @@ afterEach(() => {
     mount.parentNode.removeChild(mount);
   }
 });
-

@@ -114,4 +114,3 @@ describe("PrivacyGuard.neutralizeScript", () => {
     expect(script.isConnected).toBe(false);
   });
 });
-
