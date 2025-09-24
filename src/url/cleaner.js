@@ -272,8 +272,10 @@ export const URLCleaner = {
     for (const k of toDelete) {
       params.delete(k);
     }
-    // Remove trailing "ref" segments from path e.g., /dp/ASIN/ref=something
-    u.pathname = u.pathname.replace(/\/ref=[^/]+$/i, "");
+    // Remove Amazon-only "/ref=" path segments
+    if (/(^|\.)amazon\./i.test(u.hostname)) {
+      u.pathname = u.pathname.replace(/\/ref=[^/]+/gi, "");
+    }
     // Drop dangling '?' if nothing remains
     if ([...u.searchParams.keys()].length === 0) {
       u.search = "";
