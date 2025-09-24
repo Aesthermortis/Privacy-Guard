@@ -99,6 +99,39 @@ describe("URLCleaner.cleanHref", () => {
     const cleaned = URLCleaner.cleanHref(href);
     expect(cleaned).toBe("https://www.youtube.com/watch?v=abc123&t=45");
   });
+
+  describe("Amazon ref segment handling", () => {
+    const cases = [
+      {
+        name: "removes /ref= segment anywhere in Amazon path",
+        input: "https://www.amazon.com/dp/ABCDEF1234/ref=something/extra?utm_source=x",
+        expected: "https://www.amazon.com/dp/ABCDEF1234",
+      },
+      {
+        name: "removes ref_= tracking in Amazon search but keeps intent",
+        input: "https://www.amazon.com/s?k=ssd&ref_=nb_sb_noss",
+        expected: "https://www.amazon.com/s?k=ssd",
+      },
+      {
+        name: "does not touch /ref= segment on non-Amazon domain (path only)",
+        input: "https://example.com/blog/ref=campaign/page",
+        expected: "https://example.com/blog/ref=campaign/page",
+      },
+      {
+        name: "does not touch /ref= segment on non-Amazon domain (simple)",
+        input: "https://example.com/a/ref=cstm",
+        expected: "https://example.com/a/ref=cstm",
+      },
+    ];
+
+    cases.forEach(({ name, input, expected }) => {
+      test(name, () => {
+        const cleaned = URLCleaner.cleanHref(input);
+        expect(cleaned).toBe(expected);
+      });
+    });
+  });
+
 });
 
 describe("PrivacyGuard.neutralizeScript", () => {
