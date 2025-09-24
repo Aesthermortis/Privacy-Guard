@@ -1,3 +1,13 @@
+## [1.7.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.1...v1.7.0) (2025-09-24)
+
+### Features
+
+* **blocklist:** add new tracker domains to BLOCKED_HOSTS ([b1e230c](https://github.com/Aesthermortis/Privacy-Guard/commit/b1e230cd92fb3f65ad32d32c17d373c45efcafd9))
+
+### Performance Improvements
+
+* **core:** batch DOM observer and guard for relevant additions ([7502326](https://github.com/Aesthermortis/Privacy-Guard/commit/7502326af435fdbe453f1a7d41b96b909a477fb6))
+
 ## [1.6.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.0...v1.6.1) (2025-09-22)
 
 ### Bug Fixes
