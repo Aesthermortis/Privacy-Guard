@@ -1,3 +1,9 @@
+## [1.7.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.7.0...v1.7.1) (2025-09-24)
+
+### Bug Fixes
+
+* preserve YouTube timestamps and allow start param in URL cleaning ([16e093f](https://github.com/Aesthermortis/Privacy-Guard/commit/16e093fc72af9013a093e33658e65dcea2495be0))
+
 ## [1.7.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.1...v1.7.0) (2025-09-24)
 
 ### Features
