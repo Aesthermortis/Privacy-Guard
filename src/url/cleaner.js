@@ -177,14 +177,21 @@ export const URLCleaner = {
       // Convert shorts to watch
       const id = u.pathname.split("/")[2];
       if (id) {
+        // Capture t from query or hash (#t=...)
+        const keepT = u.searchParams.get("t") || (u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "");
         u.pathname = "/watch";
         u.search = "";
         u.searchParams.set("v", id);
+        if (keepT) {
+          u.searchParams.set("t", keepT);
+        }
+        u.hash = "";
       }
     }
     if (u.pathname === "/watch") {
-      const allow = new Set(["v", "t", "list", "index"]);
+      const allow = new Set(["v", "t", "start", "list", "index"]);
       this.stripParams(u, allow, false);
+
       const shareParams = ["si", "pp", "feature", "ab_channel"];
       for (const name of shareParams) {
         u.searchParams.delete(name);

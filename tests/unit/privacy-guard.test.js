@@ -75,6 +75,30 @@ describe("URLCleaner.cleanHref", () => {
       "https://www.youtube.com/watch?v=abc123&feature=share&ab_channel=TestChannel&si=foo&pp=some";
     expect(URLCleaner.cleanHref(href)).toBe("https://www.youtube.com/watch?v=abc123");
   });
+
+  test("preserves timestamp when converting YouTube shorts URL", () => {
+    const href = "https://www.youtube.com/shorts/shortId?t=10";
+    const cleaned = URLCleaner.cleanHref(href);
+    expect(cleaned).toBe("https://www.youtube.com/watch?v=shortId&t=10");
+  });
+
+  test("preserves timestamp in hash when converting YouTube shorts URL", () => {
+    const href = "https://www.youtube.com/shorts/shortId#t=1m30s";
+    const cleaned = URLCleaner.cleanHref(href);
+    expect(cleaned).toBe("https://www.youtube.com/watch?v=shortId&t=1m30s");
+  });
+
+  test("preserves start parameter in YouTube watch URL", () => {
+    const href = "https://www.youtube.com/watch?v=abc123&start=42&feature=share&si=xyz";
+    const cleaned = URLCleaner.cleanHref(href);
+    expect(cleaned).toBe("https://www.youtube.com/watch?v=abc123&start=42");
+  });
+
+  test("cleans youtu.be URL with timestamp and share params", () => {
+    const href = "https://youtu.be/abc123?t=45&si=xyz";
+    const cleaned = URLCleaner.cleanHref(href);
+    expect(cleaned).toBe("https://www.youtube.com/watch?v=abc123&t=45");
+  });
 });
 
 describe("PrivacyGuard.neutralizeScript", () => {
