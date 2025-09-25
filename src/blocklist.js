@@ -7,6 +7,7 @@ export const BLOCKED_HOSTS = [
   "googlesyndication.com",
   "imasdk.googleapis.com",
   "collector.github.com",
+  "ads.google.com",
 
   // Netpub ad/CDN
   "fstatic.netpub.media",
@@ -29,6 +30,9 @@ export const BLOCKED_HOSTS = [
 
   // Overbridge analytics
   "overbridgenet.com",
+
+  // Rumble ads
+  "a.ads.rmbl.ws",
 ];
 
 export const BLOCKED_RULES = [
