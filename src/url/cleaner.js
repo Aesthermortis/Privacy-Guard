@@ -96,13 +96,17 @@ export const URLCleaner = {
     // YOUTUBE: strip noisy params, keep essential ones
     if (
       FEATURES.rules.youtube &&
-      (host === "www.youtube.com" || host === "youtube.com" || host === "m.youtube.com")
+      (host === "www.youtube.com" ||
+        host === "youtube.com" ||
+        host === "m.youtube.com" ||
+        host === "youtube-nocookie.com" ||
+        host === "www.youtube-nocookie.com")
     ) {
       this.cleanYouTube(u);
       return;
     }
     if (FEATURES.rules.youtube && host === "youtu.be") {
-      this.cleanYouTuBeShort(u);
+      this.cleanYouTubeShort(u);
       return;
     }
 
@@ -166,54 +170,119 @@ export const URLCleaner = {
     this.stripParams(u, allowed, /* preserveCase*/ false);
   },
 
+  /**
+   * Clean YouTube URLs by removing unnecessary parameters and canonicalizing the path.
+   */
   cleanYouTube(u) {
-    // Canonicalize watch URLs: keep essential intent (v, t, list/index for playlists)
-    // Remove share/tracking junk (si, pp, feature, ab_channel, etc.)
     if (u.pathname === "/redirect") {
       // Will be handled by resolveRedirector
       return;
     }
-    if (u.pathname !== "/watch" && u.pathname.startsWith("/shorts/")) {
-      // Convert shorts to watch
-      const id = u.pathname.split("/")[2];
-      if (id) {
-        // Capture t from query or hash (#t=...)
-        const keepT = u.searchParams.get("t") || (u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "");
+
+    // Convert /shorts/:id and /embed/:id → /watch
+    // Special: /embed/videoseries?list=... → /playlist?list=...
+    const embedOrShortsMatch = u.pathname.match(/^\/(shorts|embed)\/([^/?#]+)/);
+    if (u.pathname !== "/watch" && embedOrShortsMatch) {
+      const section = embedOrShortsMatch[1]; // "shorts" | "embed"
+      const resourceId = embedOrShortsMatch[2]; // video id or "videoseries"
+      const isEmbed = section === "embed";
+
+      // Normalize host for embed (also handles youtube-nocookie)
+      if (isEmbed) {
+        u.hostname = "www.youtube.com";
+      }
+
+      // Playlist embeds go to /playlist
+      if (isEmbed && resourceId === "videoseries") {
+        const playlistId = u.searchParams.get("list");
+        if (playlistId) {
+          u.pathname = "/playlist";
+          u.search = "";
+          u.searchParams.set("list", playlistId);
+          u.hash = "";
+        }
+        return;
+      }
+
+      // shorts/embed with a concrete video id → /watch
+      if (resourceId) {
+        const tFromQuery = u.searchParams.get("t");
+        const tFromHash = u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "";
+        const canonicalTimeT = tFromQuery || tFromHash;
+        const startParam = u.searchParams.get("start");
+        const playlistId = u.searchParams.get("list");
+
         u.pathname = "/watch";
         u.search = "";
-        u.searchParams.set("v", id);
-        if (keepT) {
-          u.searchParams.set("t", keepT);
+        u.searchParams.set("v", resourceId);
+        if (playlistId) {
+          u.searchParams.set("list", playlistId);
+        }
+        // Prefer `t`; only use `start` when `t` is absent
+        if (canonicalTimeT) {
+          u.searchParams.set("t", canonicalTimeT);
+        } else if (startParam) {
+          u.searchParams.set("start", startParam);
         }
         u.hash = "";
       }
     }
-    if (u.pathname === "/watch") {
-      const allow = new Set(["v", "t", "start", "list", "index"]);
-      this.stripParams(u, allow, false);
 
-      const shareParams = ["si", "pp", "feature", "ab_channel"];
-      for (const name of shareParams) {
-        u.searchParams.delete(name);
+    if (u.pathname === "/watch") {
+      const allowedParams = new Set(["v", "t", "start", "list", "index"]);
+      this.stripParams(u, allowedParams, false);
+
+      const shareParams = ["si", "pp", "feature", "ab_channel", "start_radio"];
+      for (const paramName of shareParams) {
+        u.searchParams.delete(paramName);
       }
+
       // Normalize host
       u.hostname = "www.youtube.com";
     }
   },
 
-  cleanYouTuBeShort(u) {
-    // youtu.be/<id>?t=xx => https://www.youtube.com/watch?v=<id>&t=xx
-    const parts = u.pathname.split("/").filter(Boolean);
-    const id = parts[0];
-    if (id && id.length > 5) {
-      const keepT = u.searchParams.get("t");
+  /**
+   * Clean YouTube Shorts URLs by removing unnecessary parameters and canonicalizing the path.
+   */
+  cleanYouTubeShort(u) {
+    // youtu.be/<id> → https://www.youtube.com/watch?v=<id>[&t|&start][&list][&index]
+    const segments = u.pathname.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      return;
+    }
+
+    const isShortsForm = segments[0] === "shorts" && segments[1];
+    const videoId = isShortsForm ? segments[1] : segments[0];
+
+    if (videoId && videoId.length > 5) {
+      const tFromQuery = u.searchParams.get("t");
+      const tFromHash = u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "";
+      const canonicalTimeT = tFromQuery || tFromHash;
+      const startParam = u.searchParams.get("start");
+      const playlistId = u.searchParams.get("list");
+      const playlistIndex = u.searchParams.get("index");
+
       u.hostname = "www.youtube.com";
       u.pathname = "/watch";
       u.search = "";
-      u.searchParams.set("v", id);
-      if (keepT) {
-        u.searchParams.set("t", keepT);
+      u.searchParams.set("v", videoId);
+
+      if (playlistId) {
+        u.searchParams.set("list", playlistId);
       }
+      if (playlistIndex) {
+        u.searchParams.set("index", playlistIndex);
+      }
+
+      // Prefer `t`; only use `start` when `t` is absent
+      if (canonicalTimeT) {
+        u.searchParams.set("t", canonicalTimeT);
+      } else if (startParam) {
+        u.searchParams.set("start", startParam);
+      }
+
+      u.hash = "";
     }
   },
 

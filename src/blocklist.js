@@ -51,4 +51,8 @@ export const BLOCKED_RULES = [
 
   // Yandex ads
   { host: "yandex.ru", pathStartsWith: "/ads/" },
+
+  // YouTube stats/telemetry
+  { host: "youtube.com", pathStartsWith: "/api/stats" },
+  { host: "youtube.com", pathStartsWith: "/ptracking" },
 ];
