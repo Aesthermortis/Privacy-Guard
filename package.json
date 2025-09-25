@@ -15,12 +15,16 @@
     "audit": "npm audit fix"
   },
   "lint-staged": {
-    "*.{js,mjs,json}": [
-      "eslint --fix",
-      "prettier --write"
+    "**/*.{js,cjs,mjs,jsx,ts,tsx}": [
+      "eslint --fix --max-warnings=0 --report-unused-disable-directives --no-warn-ignored"
+    ],
+    "**/*": [
+      "prettier --write --ignore-unknown"
     ]
   },
   "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
     "@eslint/js": "^9.35.0",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
