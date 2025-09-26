@@ -12,6 +12,24 @@ function hostnameMatches(urlObj, patterns = []) {
   if (!host) {
     return false;
   }
+
+  const normalize = (value) => {
+    if (!value) {
+      return "";
+    }
+    return value.endsWith(".") ? value.slice(0, -1) : value;
+  };
+  const labelsMatch = (hostname, pattern) => {
+    const hostParts = hostname.split(".");
+    const patternParts = pattern.split(".");
+    if (patternParts.length < 2 || patternParts.length > hostParts.length) {
+      return false;
+    }
+    const tail = hostParts.slice(-patternParts.length).join(".");
+    return tail === pattern;
+  };
+  const hostNorm = normalize(host);
+
   return patterns.some((pattern) => {
     if (!pattern) {
       return false;
@@ -20,14 +38,16 @@ function hostnameMatches(urlObj, patterns = []) {
     if (!pat || pat === "*") {
       return false;
     }
-    if (pat.startsWith("*.")) {
-      const base = pat.slice(2);
+
+    const patNorm = normalize(pat);
+    if (patNorm.startsWith("*.")) {
+      const base = patNorm.slice(2);
       if (!base) {
         return false;
       }
-      return host === base || host.endsWith(`.${base}`);
+      return hostNorm === base || labelsMatch(hostNorm, base);
     }
-    return host === pat || host.endsWith(`.${pat}`);
+    return hostNorm === patNorm || labelsMatch(hostNorm, patNorm);
   });
 }
 
