@@ -1,18 +1,30 @@
+## [1.8.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.7.1...v1.8.0) (2025-09-26)
+
+### Features
+
+- **blocklist:** expand ad and tracker domain coverage ([93e49c6](https://github.com/Aesthermortis/Privacy-Guard/commit/93e49c69a0607caed8649e23844f772cbac0bc54))
+- **url:** canonicalize and robustly clean YouTube URLs ([521bc03](https://github.com/Aesthermortis/Privacy-Guard/commit/521bc037c18636364fdf3571c05b6b963ca2f184))
+
+### Bug Fixes
+
+- **cleaner:** restrict /ref= path stripping to Amazon hosts only ([0b8363c](https://github.com/Aesthermortis/Privacy-Guard/commit/0b8363c0da3f56a8d57457a4117e874bf609f970))
+- **core:** label-aware hostname matching and trailing-dot normalization ([a850fbb](https://github.com/Aesthermortis/Privacy-Guard/commit/a850fbbbb08ac2f6e36636251ff7fa62d638fdf9))
+
 ## [1.7.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.7.0...v1.7.1) (2025-09-24)
 
 ### Bug Fixes
 
-* preserve YouTube timestamps and allow start param in URL cleaning ([16e093f](https://github.com/Aesthermortis/Privacy-Guard/commit/16e093fc72af9013a093e33658e65dcea2495be0))
+- preserve YouTube timestamps and allow start param in URL cleaning ([16e093f](https://github.com/Aesthermortis/Privacy-Guard/commit/16e093fc72af9013a093e33658e65dcea2495be0))
 
 ## [1.7.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.1...v1.7.0) (2025-09-24)
 
 ### Features
 
-* **blocklist:** add new tracker domains to BLOCKED_HOSTS ([b1e230c](https://github.com/Aesthermortis/Privacy-Guard/commit/b1e230cd92fb3f65ad32d32c17d373c45efcafd9))
+- **blocklist:** add new tracker domains to BLOCKED_HOSTS ([b1e230c](https://github.com/Aesthermortis/Privacy-Guard/commit/b1e230cd92fb3f65ad32d32c17d373c45efcafd9))
 
 ### Performance Improvements
 
-* **core:** batch DOM observer and guard for relevant additions ([7502326](https://github.com/Aesthermortis/Privacy-Guard/commit/7502326af435fdbe453f1a7d41b96b909a477fb6))
+- **core:** batch DOM observer and guard for relevant additions ([7502326](https://github.com/Aesthermortis/Privacy-Guard/commit/7502326af435fdbe453f1a7d41b96b909a477fb6))
 
 ## [1.6.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.6.0...v1.6.1) (2025-09-22)
 
