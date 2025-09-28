@@ -1,3 +1,9 @@
+## [1.8.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.8.0...v1.8.1) (2025-09-28)
+
+### Bug Fixes
+
+- **privacy:** prevent network requests for blocked scripts ([0e9c833](https://github.com/Aesthermortis/Privacy-Guard/commit/0e9c833c926fe6c5200bd846f7e95877bef4f4ba))
+
 ## [1.8.0](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.7.1...v1.8.0) (2025-09-26)
 
 ### Features
