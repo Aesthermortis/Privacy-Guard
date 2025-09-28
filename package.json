@@ -3,7 +3,13 @@
   "version": "1.0.0",
   "description": "UserScript to enhance privacy protection across websites.",
   "type": "module",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
   "scripts": {
+    "preinstall": "node scripts/guard-engines.js",
+    "pretest": "npm ci --no-audit --fund=false",
     "build": "rollup -c",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx,.mjs,.cjs --fix",
     "format": "prettier --write .",
