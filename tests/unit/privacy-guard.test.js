@@ -429,3 +429,45 @@ describe("PrivacyGuard.neutralizeScript", () => {
     expect(script.isConnected).toBe(false);
   });
 });
+
+describe("PrivacyGuard.interceptElementCreation", () => {
+  let originalCreateElement;
+  let originalInitialized;
+  let originalScriptBlockMode;
+
+  beforeEach(() => {
+    originalCreateElement = document.createElement;
+    originalInitialized = PrivacyGuard._initialized;
+    originalScriptBlockMode = CONFIG.scriptBlockMode;
+    PrivacyGuard._initialized = false; // Allow re-initialization
+    jest.spyOn(PrivacyGuard, "shouldBlock").mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    document.createElement = originalCreateElement;
+    PrivacyGuard._initialized = originalInitialized;
+    CONFIG.scriptBlockMode = originalScriptBlockMode;
+    jest.restoreAllMocks();
+  });
+
+  test("prevents setting src attribute on a blocked script", () => {
+    CONFIG.scriptBlockMode = "createElement";
+    PrivacyGuard.init(); // This will call interceptElementCreation
+
+    PrivacyGuard.shouldBlock.mockImplementation((url) => {
+      try {
+        return new URL(url).hostname === "evil-tracker.com";
+      } catch (e) {
+        return false;
+      }
+    });
+
+    const script = document.createElement("script");
+    const setAttributeSpy = jest.spyOn(script, "setAttribute");
+
+    script.src = "https://evil-tracker.com/track.js";
+
+    expect(setAttributeSpy).toHaveBeenCalledWith("type", "text/plain");
+    expect(setAttributeSpy).not.toHaveBeenCalledWith("src", "https://evil-tracker.com/track.js");
+  });
+});

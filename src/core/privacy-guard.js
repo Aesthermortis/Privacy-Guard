@@ -170,6 +170,9 @@ export const PrivacyGuard = {
                   EventLog.push({ kind: "script", reason: "createElement", url: String(value) });
                   // Set a non-executable type to neutralize the script
                   element.setAttribute("type", "text/plain");
+                  // Return to prevent the `src` attribute from being set, which would
+                  // trigger a network request and leak the user's IP address.
+                  return;
                 }
                 // Set the original value (or let it be handled by the neutralized type)
                 element.setAttribute("src", value);
