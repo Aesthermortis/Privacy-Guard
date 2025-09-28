@@ -454,7 +454,13 @@ describe("PrivacyGuard.interceptElementCreation", () => {
     CONFIG.scriptBlockMode = "createElement";
     PrivacyGuard.init(); // This will call interceptElementCreation
 
-    PrivacyGuard.shouldBlock.mockImplementation((url) => url.includes("evil-tracker.com"));
+    PrivacyGuard.shouldBlock.mockImplementation((url) => {
+      try {
+        return new URL(url).hostname === "evil-tracker.com";
+      } catch (e) {
+        return false;
+      }
+    });
 
     const script = document.createElement("script");
     const setAttributeSpy = jest.spyOn(script, "setAttribute");
