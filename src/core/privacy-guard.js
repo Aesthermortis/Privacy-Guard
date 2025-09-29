@@ -564,7 +564,13 @@ export const PrivacyGuard = {
    * Intercepts WebSocket connections.
    */
   interceptWebSocket() {
-    const OriginalWebSocket = window.WebSocket;
+    const alreadyPatched = window.WebSocket && window.WebSocket.__PG_isPatched === true;
+    if (alreadyPatched) {
+      return;
+    }
+
+    const OriginalWebSocket =
+      (window.WebSocket && window.WebSocket.__PG_original) || window.WebSocket;
     if (!OriginalWebSocket) {
       return;
     }
@@ -617,6 +623,21 @@ export const PrivacyGuard = {
       Promise.resolve().then(fn);
     }
 
+    const canCloseEvent = typeof CloseEvent === "function";
+    function dispatchClose(target, wasClean) {
+      if (canCloseEvent) {
+        try {
+          target.dispatchEvent(
+            new CloseEvent("close", { code: 1006, reason: "", wasClean: !!wasClean }),
+          );
+          return;
+        } catch {
+          /* ignore */
+        }
+      }
+      target.dispatchEvent(new Event("close"));
+    }
+
     function createBlockedStub(url, mode) {
       const stub = Object.create(OriginalWebSocket.prototype);
       makeEmitter(stub);
@@ -637,10 +658,10 @@ export const PrivacyGuard = {
       schedule(() => {
         try {
           if (mode === "silent") {
-            stub.dispatchEvent(new Event("close"));
+            dispatchClose(stub, true);
           } else {
             stub.dispatchEvent(new Event("error"));
-            stub.dispatchEvent(new Event("close"));
+            dispatchClose(stub, false);
           }
         } catch {
           /* ignore */
@@ -653,8 +674,16 @@ export const PrivacyGuard = {
     function wrap(url, protocols) {
       const urlString = String(url);
       if (guard.shouldBlock(urlString)) {
-        console.debug("[Privacy Guard] Blocked WebSocket:", urlString);
-        EventLog.push({ kind: "websocket", reason: MODE.networkBlock, url: urlString });
+        try {
+          console.debug("[Privacy Guard] Blocked WebSocket:", urlString);
+        } catch {
+          /* ignore */
+        }
+        try {
+          EventLog.push({ kind: "websocket", reason: MODE.networkBlock, url: urlString });
+        } catch {
+          /* ignore */
+        }
 
         if (MODE.networkBlock === "silent") {
           return createBlockedStub(urlString, "silent");
@@ -663,7 +692,7 @@ export const PrivacyGuard = {
         throw new TypeError("PrivacyGuard blocked WebSocket: " + urlString);
       }
 
-      if (arguments.length === 1) {
+      if (arguments.length === 1 || typeof protocols === "undefined") {
         return new OriginalWebSocket(url);
       }
       return new OriginalWebSocket(url, protocols);
@@ -675,9 +704,16 @@ export const PrivacyGuard = {
     wrap.CLOSING = OriginalWebSocket.CLOSING;
     wrap.CLOSED = OriginalWebSocket.CLOSED;
 
+    Object.defineProperty(wrap, "__PG_isPatched", { value: true });
+    Object.defineProperty(wrap, "__PG_original", { value: OriginalWebSocket });
+
     window.WebSocket = wrap;
 
-    if ("MozWebSocket" in window && window.MozWebSocket === OriginalWebSocket) {
+    if (
+      "MozWebSocket" in window &&
+      (window.MozWebSocket === OriginalWebSocket ||
+        window.MozWebSocket === window.WebSocket.__PG_original)
+    ) {
       window.MozWebSocket = wrap;
     }
   },
