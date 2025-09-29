@@ -24,6 +24,11 @@ export default {
   // Run setup code after the test environment is ready (per test file).
   setupFilesAfterEnv: ["<rootDir>/tests/setup/jest.setup.js"],
 
+  // Mock non-JS assets to prevent parsing errors.
+  moduleNameMapper: {
+    "\\.css$": "<rootDir>/tests/setup/fileMock.js",
+  },
+
   // (Optional) Native coverage; add patterns if/when you need reports.
   // coverageProvider: "v8",
   // collectCoverageFrom: ["src/**/*.js", "!src/**/?(*.)+(spec|test).[cm]js"],
