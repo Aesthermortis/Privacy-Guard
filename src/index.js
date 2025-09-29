@@ -5,8 +5,8 @@ import { setupUIPanel } from "./ui/panel.js";
 
 try {
   applyOverridesForHost(location.hostname, STORAGE);
-} catch {
-  /* ignore */
+} catch (e) {
+  console.error("PrivacyGuard: Failed to apply per-host overrides.", e);
 }
 
 setupUIPanel();
