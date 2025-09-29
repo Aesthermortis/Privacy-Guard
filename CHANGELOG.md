@@ -1,3 +1,9 @@
+## [1.8.2](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.8.1...v1.8.2) (2025-09-29)
+
+### Bug Fixes
+
+- **youtube:** preserve index parameter in shorts url cleaning ([22d06fd](https://github.com/Aesthermortis/Privacy-Guard/commit/22d06fd004d1a3cd717389050b86a4e06e5a5c55))
+
 ## [1.8.1](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.8.0...v1.8.1) (2025-09-28)
 
 ### Bug Fixes
