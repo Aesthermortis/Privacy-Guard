@@ -457,7 +457,7 @@ describe("PrivacyGuard.interceptElementCreation", () => {
     PrivacyGuard.shouldBlock.mockImplementation((url) => {
       try {
         return new URL(url).hostname === "evil-tracker.com";
-      } catch (e) {
+      } catch {
         return false;
       }
     });
