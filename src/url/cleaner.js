@@ -211,12 +211,16 @@ export const URLCleaner = {
         const canonicalTimeT = tFromQuery || tFromHash;
         const startParam = u.searchParams.get("start");
         const playlistId = u.searchParams.get("list");
+        const playlistIndex = u.searchParams.get("index");
 
         u.pathname = "/watch";
         u.search = "";
         u.searchParams.set("v", resourceId);
         if (playlistId) {
           u.searchParams.set("list", playlistId);
+        }
+        if (playlistIndex) {
+          u.searchParams.set("index", playlistIndex);
         }
         // Prefer `t`; only use `start` when `t` is absent
         if (canonicalTimeT) {
