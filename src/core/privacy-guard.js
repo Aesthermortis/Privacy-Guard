@@ -561,6 +561,128 @@ export const PrivacyGuard = {
   },
 
   /**
+   * Intercepts WebSocket connections.
+   */
+  interceptWebSocket() {
+    const OriginalWebSocket = window.WebSocket;
+    if (!OriginalWebSocket) {
+      return;
+    }
+    const guard = this;
+
+    function makeEmitter(target) {
+      const listeners = new Map();
+      target.addEventListener = function (type, handler) {
+        if (!type || typeof handler !== "function") {
+          return;
+        }
+        const handlers = listeners.get(type) || [];
+        handlers.push(handler);
+        listeners.set(type, handlers);
+      };
+      target.removeEventListener = function (type, handler) {
+        const handlers = listeners.get(type) || [];
+        const index = handlers.indexOf(handler);
+        if (index >= 0) {
+          handlers.splice(index, 1);
+        }
+      };
+      target.dispatchEvent = function (event) {
+        const type = event && event.type ? String(event.type) : "";
+        const handlers = listeners.get(type) || [];
+        for (const handler of handlers.slice()) {
+          try {
+            handler.call(target, event);
+          } catch {
+            /* ignore */
+          }
+        }
+        const prop = "on" + type;
+        if (typeof target[prop] === "function") {
+          try {
+            target[prop].call(target, event);
+          } catch {
+            /* ignore */
+          }
+        }
+        return true;
+      };
+    }
+
+    function schedule(fn) {
+      if (typeof queueMicrotask === "function") {
+        queueMicrotask(fn);
+        return;
+      }
+      Promise.resolve().then(fn);
+    }
+
+    function createBlockedStub(url, mode) {
+      const stub = Object.create(OriginalWebSocket.prototype);
+      makeEmitter(stub);
+
+      stub.url = String(url);
+      stub.readyState = OriginalWebSocket.CLOSED;
+      stub.extensions = "";
+      stub.protocol = "";
+      stub.binaryType = "blob";
+      stub.bufferedAmount = 0;
+      stub.close = function () {
+        /* no-op */
+      };
+      stub.send = function () {
+        /* drop silently */
+      };
+
+      schedule(() => {
+        try {
+          if (mode === "silent") {
+            stub.dispatchEvent(new Event("close"));
+          } else {
+            stub.dispatchEvent(new Event("error"));
+            stub.dispatchEvent(new Event("close"));
+          }
+        } catch {
+          /* ignore */
+        }
+      });
+
+      return stub;
+    }
+
+    function wrap(url, protocols) {
+      const urlString = String(url);
+      if (guard.shouldBlock(urlString)) {
+        console.debug("[Privacy Guard] Blocked WebSocket:", urlString);
+        EventLog.push({ kind: "websocket", reason: MODE.networkBlock, url: urlString });
+
+        if (MODE.networkBlock === "silent") {
+          return createBlockedStub(urlString, "silent");
+        }
+
+        throw new TypeError("PrivacyGuard blocked WebSocket: " + urlString);
+      }
+
+      if (arguments.length === 1) {
+        return new OriginalWebSocket(url);
+      }
+      return new OriginalWebSocket(url, protocols);
+    }
+
+    wrap.prototype = OriginalWebSocket.prototype;
+    wrap.CONNECTING = OriginalWebSocket.CONNECTING;
+    wrap.OPEN = OriginalWebSocket.OPEN;
+    wrap.CLOSING = OriginalWebSocket.CLOSING;
+    wrap.CLOSED = OriginalWebSocket.CLOSED;
+
+    window.WebSocket = wrap;
+
+    if ("MozWebSocket" in window && window.MozWebSocket === OriginalWebSocket) {
+      window.MozWebSocket = wrap;
+    }
+  },
+
+  /**
    * Initializes all privacy-enhancing features.
    */
   init() {
@@ -582,6 +704,7 @@ export const PrivacyGuard = {
     this.interceptFetch();
     this.interceptBeacon();
     this.interceptXHR();
+    this.interceptWebSocket();
 
     // Enable URL cleaning runtime
     URLCleaningRuntime.init();
