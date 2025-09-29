@@ -184,4 +184,15 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     expect(u.searchParams.has("start_radio")).toBe(false);
     expect(u.searchParams.has("pp")).toBe(false);
   });
+
+  test("preserves list and index when converting a short from www.youtube.com", () => {
+    const href = "https://www.youtube.com/shorts/SHORT_ID?list=PLAYLIST_ID&index=5";
+    const out = URLCleaner.cleanHref(href);
+    const p = params(out);
+    expect(p.host).toBe("www.youtube.com");
+    expect(p.path).toBe("/watch");
+    expect(p.v).toBe("SHORT_ID");
+    expect(p.list).toBe("PLAYLIST_ID");
+    expect(p.index).toBe("5");
+  });
 });
