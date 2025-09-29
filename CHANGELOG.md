@@ -1,3 +1,9 @@
+## [1.8.3](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.8.2...v1.8.3) (2025-09-29)
+
+### Bug Fixes
+
+- **init:** log errors in catch block instead of ignoring ([505ca1b](https://github.com/Aesthermortis/Privacy-Guard/commit/505ca1b3bc1b4cf83fd1f31ff3b583b50a2d2fad))
+
 ## [1.8.2](https://github.com/Aesthermortis/Privacy-Guard/compare/v1.8.1...v1.8.2) (2025-09-29)
 
 ### Bug Fixes
