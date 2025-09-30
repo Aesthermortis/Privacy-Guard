@@ -4,6 +4,12 @@ import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js"
 import { EventLog } from "../event-log.js";
 import { URLCleaningRuntime, setShouldBlock } from "../url/runtime.js";
 
+/**
+ * Checks if the hostname of a URL object matches any of the given patterns.
+ * @param {URL} urlObj - The URL object to check.
+ * @param {string[]} patterns - The patterns to match against.
+ * @returns {boolean} - True if the hostname matches any pattern, false otherwise.
+ */
 function hostnameMatches(urlObj, patterns = []) {
   if (!urlObj || !Array.isArray(patterns) || patterns.length === 0) {
     return false;
@@ -51,6 +57,12 @@ function hostnameMatches(urlObj, patterns = []) {
   });
 }
 
+/**
+ * Checks if a URL object matches any of the given rules.
+ * @param {URL} urlObj - The URL object to check.
+ * @param {Object[]} rules - The rules to match against. Each rule should be an object of shape: { host: string, pathStartsWith?: string }
+ * @returns {boolean} - True if the URL matches any rule, false otherwise.
+ */
 function urlMatches(urlObj, rules = []) {
   if (!urlObj || !Array.isArray(rules) || rules.length === 0) {
     return false;
@@ -308,6 +320,7 @@ export const PrivacyGuard = {
 
   /**
    * Neutralize a <script> element safely (prevents execution).
+   * @param {HTMLScriptElement} el - The script element to neutralize.
    */
   neutralizeScript(el) {
     try {
@@ -561,7 +574,163 @@ export const PrivacyGuard = {
   },
 
   /**
+   * Intercepts EventSource (SSE) connections.
+   * Wraps the global EventSource constructor to block disallowed SSE connections.
+   * @returns {void}
+   */
+  interceptEventSource() {
+    if (window.EventSource && window.EventSource.__PG_isPatched === true) {
+      return;
+    }
+
+    const OriginalEventSource =
+      (window.EventSource && window.EventSource.__PG_original) || window.EventSource;
+    if (!OriginalEventSource) {
+      return;
+    }
+    const guard = this;
+
+    /**
+     * Creates a custom event emitter for the given target.
+     * @param {*} target - The target object to enhance with event emitter capabilities.
+     */
+    function makeEmitter(target) {
+      const listeners = new Map();
+      target.addEventListener = function (type, handler) {
+        if (!type || typeof handler !== "function") {
+          return;
+        }
+        const arr = listeners.get(type) || [];
+        arr.push(handler);
+        listeners.set(type, arr);
+      };
+      target.removeEventListener = function (type, handler) {
+        const arr = listeners.get(type) || [];
+        const idx = arr.indexOf(handler);
+        if (idx >= 0) {
+          arr.splice(idx, 1);
+        }
+      };
+      target.dispatchEvent = function (evt) {
+        const type = evt && evt.type ? String(evt.type) : "";
+        const arr = listeners.get(type) || [];
+        for (const h of arr.slice()) {
+          try {
+            h.call(target, evt);
+          } catch {
+            /* ignore */
+          }
+        }
+        const onprop = "on" + type;
+        if (typeof target[onprop] === "function") {
+          try {
+            target[onprop].call(target, evt);
+          } catch {
+            /* ignore */
+          }
+        }
+        return true;
+      };
+    }
+
+    /**
+     * Schedules a function to be executed in the next microtask.
+     * @param {Function} fn - The function to schedule.
+     * @returns {void}
+     */
+    function schedule(fn) {
+      if (typeof queueMicrotask === "function") {
+        queueMicrotask(fn);
+        return;
+      }
+      Promise.resolve().then(fn);
+    }
+
+    /**
+     * Creates a blocked stub for the EventSource.
+     * @param {string} urlString - The URL of the EventSource.
+     * @param {"silent"|"error"} mode - The blocking mode ("silent" or "error").
+     * @param {EventSourceInit|undefined} init - The initialization options for EventSource.
+     * @returns {EventSource} - The blocked EventSource stub.
+     */
+    function createBlockedStub(urlString, mode, init) {
+      const stub = Object.create(OriginalEventSource.prototype);
+      makeEmitter(stub);
+
+      stub.url = String(urlString);
+      stub.withCredentials = Boolean(init && init.withCredentials);
+      stub.readyState = OriginalEventSource.CLOSED;
+      stub.onopen = null;
+      stub.onmessage = null;
+      stub.onerror = null;
+      stub.close = function () {
+        /* no-op */
+      };
+
+      if (mode !== "silent") {
+        schedule(() => {
+          try {
+            stub.dispatchEvent(new Event("error"));
+          } catch {
+            /* ignore */
+          }
+        });
+      }
+
+      return stub;
+    }
+
+    /**
+     * Wraps the EventSource constructor to block connections to URLs that should be blocked.
+     * If the URL is blocked, returns a stub or throws an error depending on the blocking mode.
+     * Otherwise, creates a real EventSource instance.
+     * @param {string} url - The URL to connect to.
+     * @param {EventSourceInit|undefined} [init] - Optional EventSource initialization options.
+     * @returns {EventSource} - A real EventSource or a blocked stub.
+     */
+    function wrap(url, init) {
+      const urlString = String(url);
+      if (guard.shouldBlock(urlString)) {
+        try {
+          console.debug("[Privacy Guard] Blocked EventSource:", urlString);
+        } catch {
+          /* ignore */
+        }
+        try {
+          EventLog.push({ kind: "sse", reason: MODE.networkBlock, url: urlString });
+        } catch {
+          /* ignore */
+        }
+
+        if (MODE.networkBlock === "silent") {
+          return createBlockedStub(urlString, "silent", init);
+        }
+
+        throw new TypeError("PrivacyGuard blocked EventSource: " + urlString);
+      }
+
+      if (arguments.length === 1 || typeof init === "undefined") {
+        return new OriginalEventSource(url);
+      }
+      return new OriginalEventSource(url, init);
+    }
+
+    wrap.prototype = OriginalEventSource.prototype;
+    wrap.CONNECTING = OriginalEventSource.CONNECTING;
+    wrap.OPEN = OriginalEventSource.OPEN;
+    wrap.CLOSED = OriginalEventSource.CLOSED;
+
+    Object.defineProperty(wrap, "__PG_isPatched", { value: true });
+    Object.defineProperty(wrap, "__PG_original", { value: OriginalEventSource });
+
+    window.EventSource = wrap;
+  },
+
+  /**
    * Intercepts WebSocket connections.
+   * Wraps the global WebSocket constructor to block connections targeting disallowed URLs.
+   * Creates blocked stubs or throws errors according to the configured network blocking mode.
+   * @returns {void}
    */
   interceptWebSocket() {
     const alreadyPatched = window.WebSocket && window.WebSocket.__PG_isPatched === true;
@@ -576,6 +745,11 @@ export const PrivacyGuard = {
     }
     const guard = this;
 
+    /**
+     * Enhances the given target object with event emitter capabilities by adding
+     * addEventListener, removeEventListener, and dispatchEvent methods.
+     * @param {*} target - The object to enhance with event emitter functionality.
+     */
     function makeEmitter(target) {
       const listeners = new Map();
       target.addEventListener = function (type, handler) {
@@ -615,6 +789,10 @@ export const PrivacyGuard = {
       };
     }
 
+    /**
+     * Schedules a function to be executed in the next microtask.
+     * @param {Function} fn - The function to schedule.
+     */
     function schedule(fn) {
       if (typeof queueMicrotask === "function") {
         queueMicrotask(fn);
@@ -624,6 +802,12 @@ export const PrivacyGuard = {
     }
 
     const canCloseEvent = typeof CloseEvent === "function";
+
+    /**
+     * Dispatches a 'close' event on the given WebSocket stub, optionally indicating if the connection was clean.
+     * @param {*} target - The WebSocket stub object to dispatch the event on.
+     * @param {boolean} wasClean - Whether the connection was closed cleanly.
+     */
     function dispatchClose(target, wasClean) {
       if (canCloseEvent) {
         try {
@@ -638,6 +822,12 @@ export const PrivacyGuard = {
       target.dispatchEvent(new Event("close"));
     }
 
+    /**
+     * Creates a blocked stub for the WebSocket connection.
+     * @param {string} url - The URL of the WebSocket.
+     * @param {"silent"|"error"} mode - The blocking mode ("silent" or "error").
+     * @returns {WebSocket} - The blocked WebSocket stub.
+     */
     function createBlockedStub(url, mode) {
       const stub = Object.create(OriginalWebSocket.prototype);
       makeEmitter(stub);
@@ -671,6 +861,14 @@ export const PrivacyGuard = {
       return stub;
     }
 
+    /**
+     * Wraps the WebSocket constructor to block connections to URLs that should be blocked.
+     * If the URL is blocked, returns a stub or throws an error depending on the blocking mode.
+     * Otherwise, creates a real WebSocket instance.
+     * @param {string} url - The URL to connect to.
+     * @param {string|string[]} [protocols] - Optional subprotocols for the WebSocket connection.
+     * @returns {WebSocket} - A real WebSocket or a blocked stub.
+     */
     function wrap(url, protocols) {
       const urlString = String(url);
       if (guard.shouldBlock(urlString)) {
@@ -740,6 +938,7 @@ export const PrivacyGuard = {
     this.interceptFetch();
     this.interceptBeacon();
     this.interceptXHR();
+    this.interceptEventSource();
     this.interceptWebSocket();
 
     // Enable URL cleaning runtime
