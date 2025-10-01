@@ -384,7 +384,7 @@ describe("URLCleaner.cleanHref", () => {
     ];
 
     cases.forEach(({ name, input, expected }) => {
-      test(name, () => {
+      test(`${name}`, () => {
         const cleaned = URLCleaner.cleanHref(input);
         expect(cleaned).toBe(expected);
       });
