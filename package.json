@@ -23,7 +23,7 @@
     "audit": "npm audit fix"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.0.0",
+    "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
     "@eslint/js": "^9.36.0",
     "@eslint/json": "^0.13.2",
@@ -38,7 +38,7 @@
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-jest": "^29.0.1",
-    "eslint-plugin-jsdoc": "^60.5.0",
+    "eslint-plugin-jsdoc": "^60.7.0",
     "globals": "^16.4.0",
     "husky": "^9.1.7",
     "jest": "^30.2.0",
@@ -47,10 +47,13 @@
     "prettier": "^3.6.2",
     "rollup": "^4.52.3",
     "semantic-release": "^24.2.9",
-    "typescript": "^5.9.2",
+    "typescript": "^5.9.3",
     "typescript-eslint": "^8.45.0"
   },
   "overrides": {
-    "npm": "^11.0.0"
+    "npm": "^11",
+    "glob": ">=9",
+    "inflight": false,
+    "semver-diff": false
   }
 }
