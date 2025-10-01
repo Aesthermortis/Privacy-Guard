@@ -4,6 +4,13 @@ import { STORAGE } from "../storage.js";
 import { MODE, CONFIG, FEATURES, applyOverridesForHost } from "../config.js";
 import { EventLog } from "../event-log.js";
 
+/**
+ * Initializes the UI panel when the feature flag is enabled and wires global listeners
+ * for hotkeys and navigation changes.
+ *
+ * @returns {{show: () => void, hide: () => void, toggle: () => void, redraw: () => void} | null}
+ * Returns the panel API when enabled, otherwise null.
+ */
 export function setupUIPanel() {
   if (!FEATURES.uiPanel) {
     return null;
@@ -13,9 +20,19 @@ export function setupUIPanel() {
     let root = null;
     let visible = false;
 
+    /**
+     * Ensures the Privacy Guard panel stylesheet is injected into the document.
+     */
     function ensureCss() {
       injectCSS("pg-style", panelStyles);
     }
+
+    /**
+     * Escapes HTML special characters to prevent injection when rendering the panel log.
+     *
+     * @param {unknown} value Value that may contain HTML-sensitive characters.
+     * @returns {string} Escaped string safe to insert into HTML.
+     */
     function escapeHtml(value) {
       if (value === null || value === undefined) {
         return "";
@@ -28,6 +45,11 @@ export function setupUIPanel() {
         .replace(/'/g, "&#39;");
     }
 
+    /**
+     * Builds the panel HTML using host overrides, global defaults, and recent event log entries.
+     *
+     * @returns {string} HTML markup representing the current state of the Privacy Guard panel.
+     */
     function view() {
       const overrides = STORAGE.get(location.hostname) || { enabled: true };
       const networkBlock = overrides.networkBlock || MODE.networkBlock;
@@ -85,6 +107,11 @@ export function setupUIPanel() {
       return html;
     }
 
+    /**
+     * Creates the panel host element and binds interaction handlers on first invocation.
+     *
+     * @returns {void}
+     */
     function mount() {
       if (root) {
         return;
@@ -129,6 +156,11 @@ export function setupUIPanel() {
       });
     }
 
+    /**
+     * Regenerates the panel markup using the latest state values.
+     *
+     * @returns {void}
+     */
     function redraw() {
       if (!root) {
         return;
@@ -136,6 +168,11 @@ export function setupUIPanel() {
       root.innerHTML = view();
     }
 
+    /**
+     * Displays the panel, creating it if necessary, and refreshes its contents.
+     *
+     * @returns {void}
+     */
     function show() {
       if (!root) {
         mount();
@@ -148,6 +185,11 @@ export function setupUIPanel() {
       redraw();
     }
 
+    /**
+     * Hides the panel without tearing down the underlying DOM nodes.
+     *
+     * @returns {void}
+     */
     function hide() {
       if (!root) {
         return;
@@ -156,6 +198,11 @@ export function setupUIPanel() {
       visible = false;
     }
 
+    /**
+     * Toggles the panel visibility based on the current display state.
+     *
+     * @returns {void}
+     */
     function toggle() {
       if (visible) {
         hide();
@@ -170,6 +217,13 @@ export function setupUIPanel() {
   const DEFAULT_HOTKEY = { ctrl: true, shift: true, alt: false, key: "q" }; // Ctrl+Shift+Q
   const hotkey = null; // custom hotkey object or null for default
 
+  /**
+   * Determines whether the received keyboard event matches the configured hotkey.
+   *
+   * @param {KeyboardEvent} event Candidate keyboard event.
+   * @param {{ctrl: boolean, shift: boolean, alt: boolean, key: string}|null} hk Hotkey definition to compare against.
+   * @returns {boolean} True when the event satisfies all modifier and key requirements.
+   */
   function matchHotkey(event, hk) {
     if (!hk) {
       return false;

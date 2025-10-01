@@ -2,6 +2,11 @@ import { URLCleaner } from "./cleaner.js";
 
 let shouldBlockImpl = () => false;
 
+/**
+ * Sets the predicate used to determine if a URL should be blocked.
+ * Falls back to a no-op predicate when a non-function value is provided.
+ * @param {((url: string) => boolean)=} fn - Predicate returning true when the URL must be blocked.
+ */
 export function setShouldBlock(fn) {
   if (typeof fn === "function") {
     shouldBlockImpl = fn;

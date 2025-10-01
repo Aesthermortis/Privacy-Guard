@@ -1,9 +1,23 @@
+/**
+ * @fileoverview Ensures the running Node.js and npm versions satisfy the
+ * engines requirements before allowing further script execution.
+ */
+
 import { execSync } from "node:child_process";
 
+/**
+ * Get the major version number from a version string.
+ * @param {string|number} v - The version string to parse.
+ * @returns {number} - The major version number.
+ */
 function major(v) {
   return parseInt(String(v).split(".")[0], 10);
 }
 
+/**
+ * Get the npm version string.
+ * @returns {string} - The npm version string.
+ */
 function getNpmVersion() {
   // try to get it from npm_config_user_agent if available
   const ua = process.env.npm_config_user_agent || "";

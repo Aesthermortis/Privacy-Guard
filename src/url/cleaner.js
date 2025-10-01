@@ -172,6 +172,8 @@ export const URLCleaner = {
 
   /**
    * Clean YouTube URLs by removing unnecessary parameters and canonicalizing the path.
+   * @param {URL} u URL instance to sanitize and normalize for playback.
+   * @returns {void}
    */
   cleanYouTube(u) {
     if (u.pathname === "/redirect") {
@@ -248,6 +250,8 @@ export const URLCleaner = {
 
   /**
    * Clean YouTube Shorts URLs by removing unnecessary parameters and canonicalizing the path.
+   * @param {URL} u URL instance representing the current request to normalize.
+   * @returns {void}
    */
   cleanYouTubeShort(u) {
     // youtu.be/<id> → https://www.youtube.com/watch?v=<id>[&t|&start][&list][&index]
