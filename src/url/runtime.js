@@ -262,14 +262,11 @@ export const URLCleaningRuntime = {
         });
         if (m.type === "attributes" && m.target && m.target.nodeType === Node.ELEMENT_NODE) {
           const t = m.target;
-          if (
-            m.attributeName === "href" ||
-            m.attributeName === "src" ||
-            m.attributeName === "srcset" ||
-            m.attributeName === "action" ||
-            m.attributeName === "rel" ||
-            m.attributeName === "ping"
-          ) {
+          const ATTRS = new Set(["href", "src", "srcset", "action", "rel", "ping"]);
+          if (ATTRS.has(m.attributeName)) {
+            try {
+              delete t.dataset.privacyGuardCleaned;
+            } catch {}
             this.sweep(t);
           }
         }
