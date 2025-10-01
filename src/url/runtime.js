@@ -352,3 +352,79 @@ export const URLCleaningRuntime = {
     window.addEventListener("load", () => this.sweep(document));
   },
 };
+
+// Ensure YouTube SPA URLs stay canonical (strip start_radio, share junk, etc.)
+(function canonicalizeYouTubeSPA() {
+  try {
+    const host = location.hostname;
+    const isYouTubeHost =
+      /(^|\.)youtube\.com$/i.test(host) || /(^|\.)youtube-nocookie\.com$/i.test(host);
+    if (!isYouTubeHost) {
+      return;
+    }
+
+    let busy = false;
+
+    /**
+     * Normalizes the active YouTube SPA URL by replacing history entries with a cleaned variant.
+     * @returns {void}
+     */
+    function cleanLocationHref() {
+      if (busy) {
+        return;
+      }
+      try {
+        busy = true;
+        const cleaned = URLCleaner.cleanHref(location.href);
+        if (cleaned && cleaned !== location.href) {
+          history.replaceState(history.state, document.title, cleaned);
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        busy = false;
+      }
+    }
+
+    /**
+     * Wraps a History API method to clean URL arguments before invocation.
+     * @param {string} name - History method name to wrap (for example, "pushState").
+     * @returns {void}
+     */
+    function wrapHistory(name) {
+      const original = history[name];
+      if (typeof original !== "function") {
+        return;
+      }
+      history[name] = function (state, title, url) {
+        if (typeof url === "string") {
+          try {
+            const cleaned = URLCleaner.cleanHref(url, location.href);
+            return original.call(this, state, title, cleaned);
+          } catch {
+            /* ignore */
+          }
+        }
+        return original.apply(this, [state, title, url]);
+      };
+    }
+
+    wrapHistory("pushState");
+    wrapHistory("replaceState");
+
+    const events = ["yt-navigate-finish", "yt-page-data-updated", "popstate", "hashchange"];
+    for (const eventName of events) {
+      window.addEventListener(eventName, cleanLocationHref);
+    }
+
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+      cleanLocationHref();
+    } else {
+      document.addEventListener("DOMContentLoaded", cleanLocationHref, { once: true });
+    }
+
+    setTimeout(cleanLocationHref, 0);
+  } catch {
+    /* ignore */
+  }
+})();
