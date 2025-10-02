@@ -1,0 +1,125 @@
+/* Display & Position */
+.pg-switch {
+  display: inline-flex;
+  position: relative;
+  z-index: 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Box model */
+.pg-switch {
+  box-sizing: border-box;
+  margin: 4px 0;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+/* Layout */
+.pg-switch {
+  align-items: center;
+  gap: 10px;
+}
+
+/* Typography */
+.pg-switch {
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.1;
+  text-align: left;
+  color: #f9fafb;
+}
+
+.pg-panel .pg-switch {
+  color: inherit;
+}
+
+/* Visual effects */
+.pg-switch {
+  background-color: rgba(255, 255, 255, 0.04);
+  transition:
+    background-color 160ms ease,
+    transform 120ms ease;
+}
+
+.pg-switch:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.pg-switch:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+/* Track */
+.pg-switch__track {
+  display: inline-block;
+  position: relative;
+  box-sizing: border-box;
+  width: 36px;
+  height: 18px;
+  background-color: #4b5563;
+  border-radius: 9999px;
+  transition: background-color 160ms ease;
+  flex-shrink: 0;
+}
+
+.pg-switch--on .pg-switch__track {
+  background-color: #22c55e;
+}
+
+/* Thumb */
+.pg-switch__thumb {
+  display: block;
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background-color: #ffffff;
+  border-radius: 9999px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  transform: translate(0, -50%);
+  transition: left 160ms ease;
+}
+
+.pg-switch--on .pg-switch__thumb {
+  left: 20px;
+}
+
+/* Text */
+.pg-switch__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pg-switch__label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pg-switch__description {
+  font-size: 11px;
+  font-weight: 400;
+  color: #9ca3af;
+}
+
+.pg-switch-group {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.pg-switch-group .pg-switch {
+  width: 100%;
+  justify-content: flex-start;
+}

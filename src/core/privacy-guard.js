@@ -84,6 +84,67 @@ function urlMatches(urlObj, rules = []) {
   });
 }
 export const PrivacyGuard = {
+  STATE: {
+    channelEnabled: {
+      ws: true,
+      sse: true,
+    },
+  },
+
+  isChannelEnabled(kind) {
+    if (!this.STATE || !this.STATE.channelEnabled) {
+      return false;
+    }
+    const channel = this.STATE.channelEnabled;
+    if (!Object.prototype.hasOwnProperty.call(channel, kind)) {
+      return false;
+    }
+    return !!channel[kind];
+  },
+
+  setChannelEnabled(kind, enabled) {
+    if (!this.STATE || !this.STATE.channelEnabled) {
+      return;
+    }
+    const channel = this.STATE.channelEnabled;
+    if (!Object.prototype.hasOwnProperty.call(channel, kind)) {
+      return;
+    }
+    const next = !!enabled;
+    if (channel[kind] === next) {
+      return;
+    }
+    channel[kind] = next;
+    try {
+      localStorage.setItem("PG_channelEnabled", JSON.stringify(channel));
+    } catch {
+      /* ignore */
+    }
+  },
+
+  loadChannelEnabled() {
+    if (!this.STATE || !this.STATE.channelEnabled) {
+      return;
+    }
+    const channel = this.STATE.channelEnabled;
+    try {
+      const raw = localStorage.getItem("PG_channelEnabled");
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+      for (const key of Object.keys(channel)) {
+        if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+          channel[key] = !!parsed[key];
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  },
   /**
    * Checks if a given URL or src attribute matches any blocked pattern.
    * @param {string | null | undefined} url - The URL or src to check.
@@ -689,6 +750,11 @@ export const PrivacyGuard = {
      * @returns {EventSource} - A real EventSource or a blocked stub.
      */
     function wrap(url, init) {
+      if (!guard.isChannelEnabled("sse")) {
+        return arguments.length === 1 || typeof init === "undefined"
+          ? new OriginalEventSource(url)
+          : new OriginalEventSource(url, init);
+      }
       const urlString = String(url);
       if (guard.shouldBlock(urlString)) {
         try {
@@ -870,6 +936,11 @@ export const PrivacyGuard = {
      * @returns {WebSocket} - A real WebSocket or a blocked stub.
      */
     function wrap(url, protocols) {
+      if (!guard.isChannelEnabled("ws")) {
+        return arguments.length === 1 || typeof protocols === "undefined"
+          ? new OriginalWebSocket(url)
+          : new OriginalWebSocket(url, protocols);
+      }
       const urlString = String(url);
       if (guard.shouldBlock(urlString)) {
         try {
@@ -924,6 +995,8 @@ export const PrivacyGuard = {
       return;
     }
     this._initialized = true;
+
+    this.loadChannelEnabled();
 
     // Script interception (strategy selectable)
     if (CONFIG.scriptBlockMode === "createElement") {

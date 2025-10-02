@@ -1,8 +1,11 @@
 import panelStyles from "./panel.css";
+import switchStyles from "./styles/switch.css";
 import { injectCSS } from "./inject-css.js";
 import { STORAGE } from "../storage.js";
 import { MODE, CONFIG, FEATURES, applyOverridesForHost } from "../config.js";
 import { EventLog } from "../event-log.js";
+import { PrivacyGuard } from "../core/privacy-guard.js";
+import { createChannelToggles } from "./widgets/ChannelToggles.js";
 
 /**
  * Initializes the UI panel when the feature flag is enabled and wires global listeners
@@ -19,12 +22,15 @@ export function setupUIPanel() {
   const UIPanel = (() => {
     let root = null;
     let visible = false;
+    PrivacyGuard.loadChannelEnabled();
+    const channelToggles = createChannelToggles(PrivacyGuard);
 
     /**
      * Ensures the Privacy Guard panel stylesheet is injected into the document.
      */
     function ensureCss() {
       injectCSS("pg-style", panelStyles);
+      injectCSS("pg-switch-style", switchStyles);
     }
 
     /**
@@ -71,6 +77,9 @@ export function setupUIPanel() {
                 }>silent (204 no content)</option>
               </select>
             </div>
+          </div>
+          <div class="pg-kv pg-network-toggles"><div>Channels</div>
+            <div class="pg-switch-mount"></div>
           </div>
           <div class="pg-kv"><div>Script mode</div>
             <div>
@@ -166,6 +175,12 @@ export function setupUIPanel() {
         return;
       }
       root.innerHTML = view();
+      const mount = root.querySelector(".pg-switch-mount");
+      if (mount) {
+        mount.textContent = "";
+        mount.appendChild(channelToggles.element);
+        channelToggles.syncFromState();
+      }
     }
 
     /**
