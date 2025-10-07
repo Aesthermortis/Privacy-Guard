@@ -1,16 +1,17 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import path from "node:path";
+import { valid as semverValid } from "semver";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 /**
  * Reads the userscript metadata banner.
  * @returns {string} The metadata block for the userscript.
  */
 const getMetadata = () => {
-  return readFileSync(resolve(__dirname, "src", "metadata.txt"), "utf8");
+  return readFileSync(path.resolve(__dirname, "src", "metadata.txt"), "utf8");
 };
 
 /**
@@ -34,11 +35,24 @@ const getVersionFromTag = () => {
  */
 const getVersionFromPackage = () => {
   try {
-    const pkg = JSON.parse(readFileSync(resolve(__dirname, "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf8"));
     return pkg.version || "0.0.0";
   } catch {
     return "0.0.0";
   }
+};
+
+const isValidSemver = (rawVersion) => {
+  if (typeof rawVersion !== "string") {
+    return false;
+  }
+
+  const version = rawVersion.trim();
+  if (version === "") {
+    return false;
+  }
+
+  return semverValid(version) !== null;
 };
 
 /**
@@ -48,9 +62,7 @@ const getVersionFromPackage = () => {
  * @returns {string} The updated metadata banner.
  */
 const injectVersionIntoBanner = (banner, version) => {
-  // Simple semver validation: major.minor.patch with optional pre-release/build
-  const semverRegex = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-.]+)?(?:\+[0-9A-Za-z-.]+)?$/;
-  if (!version || !semverRegex.test(version)) {
+  if (!isValidSemver(version)) {
     throw new Error("❌ No valid version found for userscript metadata.");
   }
 
@@ -82,7 +94,7 @@ const cssAsStringPlugin = {
   name: "css-as-string",
   transform(code, id) {
     if (!id.endsWith(".css")) {
-      return null;
+      return;
     }
     return {
       code: `export default ${JSON.stringify(code)};`,
@@ -99,6 +111,6 @@ export default {
     banner: metadata,
     strict: false,
   },
-  treeshake: false,
+  treeshake: true,
   plugins: [cssAsStringPlugin],
 };
