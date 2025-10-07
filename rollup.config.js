@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { valid as semverValid } from "semver";
+import { clean as semverClean, valid as semverValid } from "semver";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,7 +52,12 @@ const isValidSemver = (rawVersion) => {
     return false;
   }
 
-  return semverValid(version) !== null;
+  const cleanedVersion = semverClean(version);
+  if (cleanedVersion === null) {
+    return false;
+  }
+
+  return semverValid(cleanedVersion) !== null;
 };
 
 /**
