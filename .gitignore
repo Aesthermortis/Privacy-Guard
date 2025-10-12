@@ -8,7 +8,10 @@ Thumbs.db
 *.bak
 *.orig
 .idea/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
 .history/
 *.code-workspace
 
@@ -20,16 +23,23 @@ pnpm-debug.log*
 
 # === Caches ===
 .eslintcache
-.rollup.cache
+*.cache
 .turbo/
 .cache/
-coverage/
 *.tsbuildinfo
 
-# === Entorno / Secretos ===
+# === Test Output ===
+coverage/
+.nyc_output/
+
+# === Environment / Secrets ===
 .env
 .env.*
 !.env.example
 
-# === Build (Rollup/JS) ===
+# === Build Artifacts ===
 dist/
+out/
+.vscode-test/
+.vscode-test-web/
+*.vsix

@@ -6,16 +6,16 @@ build/
 # Node modules
 node_modules/
 
-# Config, lockfiles y dependencias
+# Config, lockfiles and dependencies
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
-# Archivos de configuración de herramientas
+# Tool configuration files
 coverage/
 *.log
 
-# Otros archivos generados
+# Other generated files
 *.min.js
 *.bundle.js
 *.map

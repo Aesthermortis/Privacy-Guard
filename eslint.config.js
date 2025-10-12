@@ -196,6 +196,7 @@ export default defineConfig([
       "n/no-extraneous-import": "off",
       "n/no-unpublished-import": "off",
       "unicorn/prevent-abbreviations": "off",
+      "unicorn/no-null": "off",
     },
   },
 ]);
