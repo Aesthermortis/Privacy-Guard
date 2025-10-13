@@ -18,12 +18,12 @@ afterAll(() => {
 beforeEach(() => {
   const mount = document.createElement("div");
   mount.id = "test-root";
-  document.body.appendChild(mount);
+  document.body.append(mount);
 });
 
 afterEach(() => {
-  const mount = document.getElementById("test-root");
+  const mount = document.querySelector("#test-root");
   if (mount && mount.parentNode) {
-    mount.parentNode.removeChild(mount);
+    mount.remove();
   }
 });

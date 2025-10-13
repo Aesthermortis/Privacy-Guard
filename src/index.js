@@ -6,8 +6,8 @@ import { logError } from "./core/errors.js";
 
 try {
   applyOverridesForHost(location.hostname, STORAGE);
-} catch (err) {
-  logError("Failed to apply per-host overrides.", err, { onceKey: "init-overrides" });
+} catch (error) {
+  logError("Failed to apply per-host overrides.", error, { onceKey: "init-overrides" });
 }
 
 setupUIPanel();

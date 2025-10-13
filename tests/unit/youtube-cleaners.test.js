@@ -27,8 +27,8 @@ describe("YouTube cleaners - embed", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("15");
-    expect(p.has("autoplay")).toBe(false);
-    expect(p.has("origin")).toBe(false);
+    expect(p.has("autoplay")).toBeFalse();
+    expect(p.has("origin")).toBeFalse();
   });
 
   test("preserves start when t is absent", () => {
@@ -37,9 +37,9 @@ describe("YouTube cleaners - embed", () => {
     const p = params(out);
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
-    expect(p.t).toBe(null);
+    expect(p.t).toBeNull();
     expect(p.start).toBe("7");
-    expect(p.has("controls")).toBe(false);
+    expect(p.has("controls")).toBeFalse();
   });
 
   test("uses #t= from hash when present", () => {
@@ -49,7 +49,7 @@ describe("YouTube cleaners - embed", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("2m03s");
-    expect(p.start).toBe(null);
+    expect(p.start).toBeNull();
   });
 
   test("videoseries → /playlist and keeps list", () => {
@@ -58,10 +58,10 @@ describe("YouTube cleaners - embed", () => {
     const p = params(out);
     expect(p.path).toBe("/playlist");
     expect(p.list).toBe("PL123");
-    expect(p.has("autoplay")).toBe(false);
-    expect(p.v).toBe(null);
-    expect(p.t).toBe(null);
-    expect(p.start).toBe(null);
+    expect(p.has("autoplay")).toBeFalse();
+    expect(p.v).toBeNull();
+    expect(p.t).toBeNull();
+    expect(p.start).toBeNull();
   });
 
   test("prefers t over start when both exist", () => {
@@ -71,8 +71,8 @@ describe("YouTube cleaners - embed", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("90");
-    expect(p.start).toBe(null);
-    expect(p.has("rel")).toBe(false);
+    expect(p.start).toBeNull();
+    expect(p.has("rel")).toBeFalse();
   });
 });
 
@@ -85,9 +85,9 @@ describe("YouTube cleaners - youtu.be", () => {
     expect(p.host).toBe("www.youtube.com");
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
-    expect(p.t).toBe(null);
+    expect(p.t).toBeNull();
     expect(p.start).toBe("90");
-    expect(p.has("si")).toBe(false);
+    expect(p.has("si")).toBeFalse();
   });
 
   test("preserves list and index alongside t", () => {
@@ -107,7 +107,7 @@ describe("YouTube cleaners - youtu.be", () => {
     const p = params(out);
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
-    expect(p.t).toBe(null);
+    expect(p.t).toBeNull();
     expect(p.start).toBe("5");
   });
 
@@ -116,7 +116,7 @@ describe("YouTube cleaners - youtu.be", () => {
     const out = URLCleaner.cleanHref(href);
     const p = params(out);
     expect(p.t).toBe("77");
-    expect(p.start).toBe(null);
+    expect(p.start).toBeNull();
   });
 });
 
@@ -130,7 +130,7 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("42");
-    expect(p.start).toBe(null);
+    expect(p.start).toBeNull();
   });
 
   test("preserves start when t is absent", () => {
@@ -139,7 +139,7 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     const p = params(out);
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
-    expect(p.t).toBe(null);
+    expect(p.t).toBeNull();
     expect(p.start).toBe("42");
   });
 
@@ -150,14 +150,14 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("1m12s");
-    expect(p.start).toBe(null);
+    expect(p.start).toBeNull();
   });
 
   test("never emits both t and start on /watch", () => {
     const href = "https://www.youtube.com/shorts/VID123?t=10&start=5";
     const out = URLCleaner.cleanHref(href);
     const p = params(out);
-    expect(Boolean(p.t) && Boolean(p.start)).toBe(false);
+    expect(Boolean(p.t) && Boolean(p.start)).toBeFalse();
   });
 
   test("normalizes host and strips share params on /watch", () => {
@@ -169,10 +169,10 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     expect(p.path).toBe("/watch");
     expect(p.v).toBe("VID123");
     expect(p.t).toBe("42");
-    expect(p.has("si")).toBe(false);
-    expect(p.has("pp")).toBe(false);
-    expect(p.has("feature")).toBe(false);
-    expect(p.has("ab_channel")).toBe(false);
+    expect(p.has("si")).toBeFalse();
+    expect(p.has("pp")).toBeFalse();
+    expect(p.has("feature")).toBeFalse();
+    expect(p.has("ab_channel")).toBeFalse();
   });
 
   test("strips start_radio on /watch", () => {
@@ -181,8 +181,8 @@ describe("YouTube cleaners - shorts and canonicalization", () => {
     const u = new URL(out);
     expect(u.searchParams.get("v")).toBe("VID");
     expect(u.searchParams.get("list")).toBe("PL");
-    expect(u.searchParams.has("start_radio")).toBe(false);
-    expect(u.searchParams.has("pp")).toBe(false);
+    expect(u.searchParams.has("start_radio")).toBeFalse();
+    expect(u.searchParams.has("pp")).toBeFalse();
   });
 
   test("preserves list and index when converting a short from www.youtube.com", () => {

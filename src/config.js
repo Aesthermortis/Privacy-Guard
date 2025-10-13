@@ -20,7 +20,7 @@ export const CONFIG = {
 /**
  * Apply per-domain overrides for a specific hostname.
  * @param {string} hostname - The hostname to apply overrides for.
- * @param {Object} storage - The storage object containing overrides.
+ * @param {object} storage - The storage object containing overrides.
  * @returns {void}
  */
 export function applyOverridesForHost(hostname, storage) {
