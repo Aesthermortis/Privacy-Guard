@@ -8,9 +8,27 @@ import { PrivacyGuard } from "../core/privacy-guard.js";
 import { createChannelToggles } from "./widgets/ChannelToggles.js";
 
 /**
+ * Determines whether the received keyboard event matches the configured hotkey.
+ * @param {KeyboardEvent} event Candidate keyboard event.
+ * @param {{ctrl: boolean, shift: boolean, alt: boolean, key: string} | null} hk Hotkey definition to compare against.
+ * @returns {boolean} True when the event satisfies all modifier and key requirements.
+ */
+function matchHotkey(event, hk) {
+  if (!hk) {
+    return false;
+  }
+  const key = (event.key || "").toLowerCase();
+  return (
+    !!event.ctrlKey === !!hk.ctrl &&
+    !!event.shiftKey === !!hk.shift &&
+    !!event.altKey === !!hk.alt &&
+    key === (hk.key || "").toLowerCase()
+  );
+}
+
+/**
  * Initializes the UI panel when the feature flag is enabled and wires global listeners
  * for hotkeys and navigation changes.
- *
  * @returns {{show: () => void, hide: () => void, toggle: () => void, redraw: () => void} | null}
  * Returns the panel API when enabled, otherwise null.
  */
@@ -35,7 +53,6 @@ export function setupUIPanel() {
 
     /**
      * Escapes HTML special characters to prevent injection when rendering the panel log.
-     *
      * @param {unknown} value Value that may contain HTML-sensitive characters.
      * @returns {string} Escaped string safe to insert into HTML.
      */
@@ -44,16 +61,15 @@ export function setupUIPanel() {
         return "";
       }
       return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
     }
 
     /**
      * Builds the panel HTML using host overrides, global defaults, and recent event log entries.
-     *
      * @returns {string} HTML markup representing the current state of the Privacy Guard panel.
      */
     function view() {
@@ -65,7 +81,7 @@ export function setupUIPanel() {
       const html = `
           <div class="pg-row"><span class="pg-title">Privacy Guard</span><span class="pg-chip">${
             location.hostname
-          }</span><button class="pg-btn pg-close pg-right" title="Close">❌</button></div>
+          }</span><button type="button" class="pg-btn pg-close pg-right" title="Close" data-pg-action="close">❌</button></div>
           <div class="pg-kv"><div>Network block</div>
             <div>
               <select class="pg-input pg-nb">
@@ -79,6 +95,7 @@ export function setupUIPanel() {
             </div>
           </div>
           <div class="pg-kv pg-network-toggles"><div>Channels</div>
+            <div class="pg-switch-help">Per site (this domain only)</div>
             <div class="pg-switch-mount"></div>
           </div>
           <div class="pg-kv"><div>Script mode</div>
@@ -95,9 +112,9 @@ export function setupUIPanel() {
           </div>
           <div class="pg-row"><label><input type="checkbox" class="pg-aso" ${allowSameOrigin ? "checked" : ""}/> Allow same-origin scripts</label><span class="pg-muted pg-right">Reduces privacy</span></div>
           <div class="pg-row"><label><input type="checkbox" class="pg-enable" ${
-            overrides.enabled !== false ? "checked" : ""
+            overrides.enabled === false ? "" : "checked"
           }/> Enable overrides for this domain</label></div>
-          <div class="pg-row"><button class="pg-btn pg-save">Save</button><button class="pg-btn pg-reset">Reset</button><span class="pg-muted pg-right">Hotkey: Ctrl+Shift+Q</span></div>
+          <div class="pg-row"><button type="button" class="pg-btn pg-save" data-pg-action="save">Save</button><button type="button" class="pg-btn pg-reset" data-pg-action="reset">Reset</button><span class="pg-muted pg-right">Hotkey: Ctrl+Shift+Q</span></div>
           <div class="pg-log">
             <div class="pg-row"><span class="pg-title">Recent blocks</span><span class="pg-muted pg-right">${
               list.length
@@ -117,8 +134,77 @@ export function setupUIPanel() {
     }
 
     /**
+     * Reads the current override selections from the rendered panel.
+     * @param {HTMLElement} panelRoot Panel container element.
+     * @returns {{enabled: boolean, networkBlock: string, scriptBlockMode: string, allowSameOrigin: boolean}}
+     * Collected override values.
+     */
+    function collectOverridesFromDom(panelRoot) {
+      const nb = panelRoot.querySelector(".pg-nb");
+      const sbm = panelRoot.querySelector(".pg-sbm");
+      const enabled = panelRoot.querySelector(".pg-enable");
+      const aso = panelRoot.querySelector(".pg-aso");
+      return {
+        enabled: Boolean(enabled && enabled.checked),
+        networkBlock: nb && nb.value ? nb.value : MODE.networkBlock,
+        scriptBlockMode: sbm && sbm.value ? sbm.value : CONFIG.scriptBlockMode,
+        allowSameOrigin: Boolean(aso && aso.checked),
+      };
+    }
+
+    /**
+     * Persists the collected overrides for the active hostname and refreshes the UI.
+     * @param {HTMLElement} panelRoot Panel container element.
+     * @returns {void}
+     */
+    function persistOverrides(panelRoot) {
+      const next = collectOverridesFromDom(panelRoot);
+      STORAGE.set(location.hostname, next);
+      applyOverridesForHost(location.hostname, STORAGE);
+      redraw();
+    }
+
+    /**
+     * Resets host overrides and refreshes the UI.
+     * @returns {void}
+     */
+    function resetOverrides() {
+      STORAGE.remove(location.hostname);
+      applyOverridesForHost(location.hostname, STORAGE);
+      redraw();
+    }
+
+    /**
+     * Creates a delegated click handler for panel actions.
+     * @param {HTMLElement} panelRoot Panel container element.
+     * @returns {(event: MouseEvent) => void} Handler responding to action buttons.
+     */
+    function createPanelClickHandler(panelRoot) {
+      const actionHandlers = new Map([
+        ["close", () => hide()],
+        ["save", () => persistOverrides(panelRoot)],
+        ["reset", () => resetOverrides()],
+      ]);
+
+      return (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const actionable = target.closest("[data-pg-action]");
+        if (!actionable) {
+          return;
+        }
+        const action = actionable.dataset.pgAction;
+        const handler = action && actionHandlers.get(action);
+        if (handler) {
+          handler();
+        }
+      };
+    }
+
+    /**
      * Creates the panel host element and binds interaction handlers on first invocation.
-     *
      * @returns {void}
      */
     function mount() {
@@ -130,44 +216,13 @@ export function setupUIPanel() {
       root.className = "pg-panel";
       root.setAttribute("role", "dialog");
       root.setAttribute("aria-label", "Privacy Guard Panel");
-      document.documentElement.appendChild(root);
+      document.documentElement.append(root);
       redraw();
-      root.addEventListener("click", (event) => {
-        const target = event.target;
-        if (!(target instanceof Element)) {
-          return;
-        }
-        if (target.classList.contains("pg-close")) {
-          hide();
-          return;
-        }
-        if (target.classList.contains("pg-save")) {
-          const nb = root.querySelector(".pg-nb");
-          const sbm = root.querySelector(".pg-sbm");
-          const enabled = root.querySelector(".pg-enable");
-          const aso = root.querySelector(".pg-aso");
-          const next = {
-            enabled: enabled && enabled.checked ? true : false,
-            networkBlock: nb && nb.value ? nb.value : MODE.networkBlock,
-            scriptBlockMode: sbm && sbm.value ? sbm.value : CONFIG.scriptBlockMode,
-            allowSameOrigin: aso && aso.checked ? true : false,
-          };
-          STORAGE.set(location.hostname, next);
-          applyOverridesForHost(location.hostname, STORAGE);
-          redraw();
-          return;
-        }
-        if (target.classList.contains("pg-reset")) {
-          STORAGE.remove(location.hostname);
-          applyOverridesForHost(location.hostname, STORAGE);
-          redraw();
-        }
-      });
+      root.addEventListener("click", createPanelClickHandler(root));
     }
 
     /**
      * Regenerates the panel markup using the latest state values.
-     *
      * @returns {void}
      */
     function redraw() {
@@ -178,14 +233,13 @@ export function setupUIPanel() {
       const mount = root.querySelector(".pg-switch-mount");
       if (mount) {
         mount.textContent = "";
-        mount.appendChild(channelToggles.element);
+        mount.append(channelToggles.element);
         channelToggles.syncFromState();
       }
     }
 
     /**
      * Displays the panel, creating it if necessary, and refreshes its contents.
-     *
      * @returns {void}
      */
     function show() {
@@ -202,7 +256,6 @@ export function setupUIPanel() {
 
     /**
      * Hides the panel without tearing down the underlying DOM nodes.
-     *
      * @returns {void}
      */
     function hide() {
@@ -215,7 +268,6 @@ export function setupUIPanel() {
 
     /**
      * Toggles the panel visibility based on the current display state.
-     *
      * @returns {void}
      */
     function toggle() {
@@ -232,27 +284,7 @@ export function setupUIPanel() {
   const DEFAULT_HOTKEY = { ctrl: true, shift: true, alt: false, key: "q" }; // Ctrl+Shift+Q
   const hotkey = null; // custom hotkey object or null for default
 
-  /**
-   * Determines whether the received keyboard event matches the configured hotkey.
-   *
-   * @param {KeyboardEvent} event Candidate keyboard event.
-   * @param {{ctrl: boolean, shift: boolean, alt: boolean, key: string}|null} hk Hotkey definition to compare against.
-   * @returns {boolean} True when the event satisfies all modifier and key requirements.
-   */
-  function matchHotkey(event, hk) {
-    if (!hk) {
-      return false;
-    }
-    const key = (event.key || "").toLowerCase();
-    return (
-      !!event.ctrlKey === !!hk.ctrl &&
-      !!event.shiftKey === !!hk.shift &&
-      !!event.altKey === !!hk.alt &&
-      key === (hk.key || "").toLowerCase()
-    );
-  }
-
-  window.addEventListener(
+  globalThis.addEventListener(
     "keydown",
     (event) => {
       try {
@@ -275,8 +307,8 @@ export function setupUIPanel() {
     true,
   );
 
-  window.addEventListener("popstate", () => UIPanel.redraw());
-  window.addEventListener("hashchange", () => UIPanel.redraw());
+  globalThis.addEventListener("popstate", () => UIPanel.redraw());
+  globalThis.addEventListener("hashchange", () => UIPanel.redraw());
 
   return UIPanel;
 }
