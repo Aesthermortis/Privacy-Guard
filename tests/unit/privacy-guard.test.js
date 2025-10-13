@@ -5,6 +5,50 @@ import { CONFIG } from "../../src/config.js";
 import { BLOCKED_HOSTS, BLOCKED_RULES } from "../../src/blocklist.js";
 import { URLCleaner } from "../../src/url/cleaner.js";
 
+const restoreBlockedRules = (snapshot) => {
+  BLOCKED_RULES.length = 0;
+  BLOCKED_RULES.push(...snapshot);
+};
+
+const captureBlockedHosts = () => [...BLOCKED_HOSTS];
+const restoreBlockedHosts = (snapshot) => {
+  BLOCKED_HOSTS.length = 0;
+  BLOCKED_HOSTS.push(...snapshot);
+};
+
+const withAppendedBlockedHosts = (patterns, assertion) => {
+  const snapshot = captureBlockedHosts();
+  try {
+    BLOCKED_HOSTS.push(...patterns);
+    assertion();
+  } finally {
+    restoreBlockedHosts(snapshot);
+  }
+};
+
+const withCustomBlockedHosts = (patterns, assertion) => {
+  const snapshot = captureBlockedHosts();
+  try {
+    BLOCKED_HOSTS.length = 0;
+    BLOCKED_HOSTS.push(...patterns);
+    assertion();
+  } finally {
+    restoreBlockedHosts(snapshot);
+  }
+};
+
+const captureBlockedRules = () => [...BLOCKED_RULES];
+const withCustomBlockedRules = (rules, assertion) => {
+  const snapshot = captureBlockedRules();
+  try {
+    BLOCKED_RULES.length = 0;
+    BLOCKED_RULES.push(...rules);
+    assertion();
+  } finally {
+    restoreBlockedRules(snapshot);
+  }
+};
+
 describe("PrivacyGuard.shouldBlock", () => {
   let originalAllowSameOrigin;
 
@@ -19,19 +63,19 @@ describe("PrivacyGuard.shouldBlock", () => {
 
   test("blocks URLs matching blocked patterns", () => {
     const shouldBlock = PrivacyGuard.shouldBlock("https://doubleclick.net/track.js");
-    expect(shouldBlock).toBe(true);
+    expect(shouldBlock).toBeTrue();
   });
 
   test("allows safe schemes", () => {
     const shouldBlock = PrivacyGuard.shouldBlock("data:text/plain,hello");
-    expect(shouldBlock).toBe(false);
+    expect(shouldBlock).toBeFalse();
   });
 
   test("blocks same-origin tracker URLs when allowSameOrigin is disabled", () => {
     BLOCKED_RULES.push({ host: location.hostname, pathStartsWith: "/ga-tracker" });
     try {
       const url = `${location.origin}/ga-tracker/collect.js`;
-      expect(PrivacyGuard.shouldBlock(url)).toBe(true);
+      expect(PrivacyGuard.shouldBlock(url)).toBeTrue();
     } finally {
       BLOCKED_RULES.pop();
     }
@@ -42,7 +86,7 @@ describe("PrivacyGuard.shouldBlock", () => {
     BLOCKED_RULES.push({ host: location.hostname, pathStartsWith: "/ga-tracker" });
     try {
       const url = `${location.origin}/ga-tracker/collect.js`;
-      expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+      expect(PrivacyGuard.shouldBlock(url)).toBeFalse();
     } finally {
       BLOCKED_RULES.pop();
     }
@@ -50,206 +94,167 @@ describe("PrivacyGuard.shouldBlock", () => {
 
   test("ignores tracker hostnames that appear only in query parameters", () => {
     const url = "https://example.com/page?next=https://google-analytics.com/collect";
-    expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+    expect(PrivacyGuard.shouldBlock(url)).toBeFalse();
   });
 
   test("blocks tracker paths defined in structured rules", () => {
     const url = "https://www.facebook.com/plugins/like.php";
-    expect(PrivacyGuard.shouldBlock(url)).toBe(true);
+    expect(PrivacyGuard.shouldBlock(url)).toBeTrue();
   });
 
   test("allows non-tracker paths on the same host", () => {
     const url = "https://www.facebook.com/profile";
-    expect(PrivacyGuard.shouldBlock(url)).toBe(false);
+    expect(PrivacyGuard.shouldBlock(url)).toBeFalse();
   });
 });
 
 describe("PrivacyGuard hostname matching", () => {
-  const captureBlockedHosts = () => [...BLOCKED_HOSTS];
-  const restoreBlockedHosts = (snapshot) => {
-    BLOCKED_HOSTS.length = 0;
-    BLOCKED_HOSTS.push(...snapshot);
-  };
-  const withAppendedBlockedHosts = (patterns, assertion) => {
-    const snapshot = captureBlockedHosts();
-    try {
-      BLOCKED_HOSTS.push(...patterns);
-      assertion();
-    } finally {
-      restoreBlockedHosts(snapshot);
-    }
-  };
-  const withCustomBlockedHosts = (patterns, assertion) => {
-    const snapshot = captureBlockedHosts();
-    try {
-      BLOCKED_HOSTS.length = 0;
-      BLOCKED_HOSTS.push(...patterns);
-      assertion();
-    } finally {
-      restoreBlockedHosts(snapshot);
-    }
-  };
-  const captureBlockedRules = () => [...BLOCKED_RULES];
-  const restoreBlockedRules = (snapshot) => {
-    BLOCKED_RULES.length = 0;
-    BLOCKED_RULES.push(...snapshot);
-  };
-  const withCustomBlockedRules = (rules, assertion) => {
-    const snapshot = captureBlockedRules();
-    try {
-      BLOCKED_RULES.length = 0;
-      BLOCKED_RULES.push(...rules);
-      assertion();
-    } finally {
-      restoreBlockedRules(snapshot);
-    }
-  };
   test("prevents suffix-based false positives", () => {
     withAppendedBlockedHosts(["ample.com"], () => {
-      expect(PrivacyGuard.shouldBlock("https://example.com/page")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://testample.com/page")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://ample.com/track")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.ample.com/track")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com/page")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://testample.com/page")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://ample.com/track")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.ample.com/track")).toBeTrue();
     });
   });
   test("handles short domain patterns without false positives", () => {
     withAppendedBlockedHosts(["x.co"], () => {
-      expect(PrivacyGuard.shouldBlock("https://ex.co/page")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://tax.co/page")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://x.co/track")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.x.co/track")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://ex.co/page")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://tax.co/page")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://x.co/track")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.x.co/track")).toBeTrue();
     });
   });
   test("treats wildcard patterns as matching apex and subdomains", () => {
     withAppendedBlockedHosts(["*.example.com"], () => {
       // Wildcard semantics remain permissive: the apex and any subdomain are blocked.
-      expect(PrivacyGuard.shouldBlock("https://example.com/page")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/page")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://a.b.example.com/page")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com/page")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/page")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://a.b.example.com/page")).toBeTrue();
       // Strict semantics would require excluding the apex by checking host !== base; documented here to avoid unintended changes.
     });
   });
   test("normalizes case differences and trailing dots before matching", () => {
     withAppendedBlockedHosts(["Example.COM."], () => {
-      expect(PrivacyGuard.shouldBlock("https://example.com./tracker")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://EXAMPLE.COM./tracker")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://Sub.Example.CoM./tracker")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com./tracker")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://EXAMPLE.COM./tracker")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://Sub.Example.CoM./tracker")).toBeTrue();
     });
   });
   test("does not treat IP addresses as hostname matches", () => {
     withAppendedBlockedHosts(["example.com"], () => {
-      expect(PrivacyGuard.shouldBlock("https://93.184.216.34/resource")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://[2001:db8::1]/resource")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://93.184.216.34/resource")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://[2001:db8::1]/resource")).toBeFalse();
     });
   });
   test("ignores scheme and port differences when host matches", () => {
     withAppendedBlockedHosts(["example.com"], () => {
-      expect(PrivacyGuard.shouldBlock("http://example.com:80/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://example.com:443/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com:8443/a")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("http://example.com:80/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://example.com:443/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com:8443/a")).toBeTrue();
     });
   });
   test("avoids blocking lookalike substrings", () => {
     withAppendedBlockedHosts(["example.com"], () => {
-      expect(PrivacyGuard.shouldBlock("https://testexample.com/a")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://ex-ample.com/a")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://testexample.com/a")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://ex-ample.com/a")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBeTrue();
     });
   });
   test("matches multi-label patterns without relying on a PSL", () => {
     withAppendedBlockedHosts(["co.uk"], () => {
-      expect(PrivacyGuard.shouldBlock("https://example.co.uk/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.co.uk/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://example.uk/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.co.uk/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.co.uk/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://example.uk/a")).toBeFalse();
     });
   });
   test("ignores invalid or trivial patterns while handling duplicates", () => {
-    withCustomBlockedHosts(["", "   ", "*", "*.", ".", null, undefined], () => {
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(false);
+    withCustomBlockedHosts(["", "   ", "*", "*.", ".", null, void 0], () => {
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeFalse();
     });
     withCustomBlockedHosts(["example.com", "example.com"], () => {
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeTrue();
     });
   });
   test("trims whitespace around patterns", () => {
     withAppendedBlockedHosts(["   example.com   "], () => {
       // Hosts originate from URL.hostname and therefore never include whitespace; trimming keeps parity with stored patterns.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeTrue();
     });
   });
   test("fails safe when URL lacks a hostname", () => {
-    expect(PrivacyGuard.shouldBlock(null)).toBe(false);
-    expect(PrivacyGuard.shouldBlock(undefined)).toBe(false);
-    expect(PrivacyGuard.shouldBlock("mailto:user@example.com")).toBe(false);
-    expect(PrivacyGuard.shouldBlock("not a valid url")).toBe(false);
+    expect(PrivacyGuard.shouldBlock(null)).toBeFalse();
+    expect(PrivacyGuard.shouldBlock()).toBeFalse();
+    expect(PrivacyGuard.shouldBlock("mailto:user@example.com")).toBeFalse();
+    expect(PrivacyGuard.shouldBlock("not a valid url")).toBeFalse();
   });
   test("normalizes wildcard patterns with trailing dots and case differences", () => {
     withAppendedBlockedHosts(["*.Example.COM."], () => {
       // Normalization lowers case and removes trailing dots before comparing trailing labels.
       // Wildcard semantics stay permissive: apex and subdomains are intentionally blocked together.
-      expect(PrivacyGuard.shouldBlock("https://example.com./analytics")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://Sub.Example.com./pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://deep.sub.EXAMPLE.COM./collect")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com./analytics")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://Sub.Example.com./pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://deep.sub.EXAMPLE.COM./collect")).toBeTrue();
     });
   });
   test("ignores creatively invalid wildcard patterns", () => {
     withCustomBlockedHosts(["*.*.example.com", "**.example.com", "*..example.com"], () => {
       // Only single-segment wildcards (e.g. '*.example.com') are supported; other shapes are treated as inert noise.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBeFalse();
     });
   });
   test("treats leading-dot patterns as invalid", () => {
     withAppendedBlockedHosts([".example.com"], () => {
       // A leading dot has no semantic meaning in label-aware comparisons, so it should not affect apex or subdomains.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBeFalse();
     });
   });
   test("ignores patterns formed by stray dots", () => {
     withCustomBlockedHosts(["..", ". .", " . "], () => {
       // Whitespace or lone-dot patterns are sanitized away and never trigger a match.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeFalse();
     });
   });
   test("applies only valid entries when mixed with invalid noise", () => {
     withCustomBlockedHosts(["example.com", "*.*.example.com", ".example.com", ".."], () => {
       // Noise entries are ignored, leaving the valid host as the sole contributor to blocking decisions.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://example.com.tracker/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://example.com.tracker/a")).toBeFalse();
     });
   });
   test("matches hosts with deep label chains", () => {
     withAppendedBlockedHosts(["example.com"], () => {
       // Matching compares the suffix labels, so arbitrary subdomain depth still resolves correctly.
-      expect(PrivacyGuard.shouldBlock("https://a.b.c.d.e.example.com/collect")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://a.b.c.d.e.example.com/collect")).toBeTrue();
     });
   });
   test("matches patterns containing hyphens and digits literally", () => {
     withAppendedBlockedHosts(["a-1-example.com"], () => {
       // Label comparison is literal: hyphens and digits must line up exactly across each segment.
-      expect(PrivacyGuard.shouldBlock("https://a-1-example.com/track")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.a-1-example.com/track")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://a1example.com/track")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://a-1-example.com/track")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.a-1-example.com/track")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://a1example.com/track")).toBeFalse();
     });
   });
   test("keeps overlapping prefixes independent across patterns", () => {
     withCustomBlockedHosts(["ample.com", "example.com"], () => {
       // Each pattern is evaluated independently, preventing suffix fixes from regressing when similar hosts coexist.
-      expect(PrivacyGuard.shouldBlock("https://ample.com/pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.ample.com/pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://example.com/pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://testample.com/pixel")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://ample.com/pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.ample.com/pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://example.com/pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://testample.com/pixel")).toBeFalse();
     });
   });
   test("does not treat top-level domains as catch-alls", () => {
     withAppendedBlockedHosts(["com"], () => {
       // Without PSL data the matcher compares explicit labels only; bare TLDs should never blanket-match multi-label hosts.
-      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBe(false);
-      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBe(false);
+      expect(PrivacyGuard.shouldBlock("https://example.com/a")).toBeFalse();
+      expect(PrivacyGuard.shouldBlock("https://sub.example.com/a")).toBeFalse();
     });
   });
   test("documents composition between BLOCKED_RULES and BLOCKED_HOSTS", () => {
@@ -257,15 +262,15 @@ describe("PrivacyGuard hostname matching", () => {
     withCustomBlockedHosts([], () => {
       withCustomBlockedRules([pathRule], () => {
         // Case A: path rules operate even without host entries, targeting only the configured prefix.
-        expect(PrivacyGuard.shouldBlock("https://example.com/pixel/collect")).toBe(true);
-        expect(PrivacyGuard.shouldBlock("https://example.com/other")).toBe(false);
+        expect(PrivacyGuard.shouldBlock("https://example.com/pixel/collect")).toBeTrue();
+        expect(PrivacyGuard.shouldBlock("https://example.com/other")).toBeFalse();
       });
     });
     withCustomBlockedHosts(["example.com"], () => {
       withCustomBlockedRules([], () => {
         // Case B: host entries alone block every path regardless of scheme or port.
-        expect(PrivacyGuard.shouldBlock("https://example.com/pixel/collect")).toBe(true);
-        expect(PrivacyGuard.shouldBlock("https://example.com/other")).toBe(true);
+        expect(PrivacyGuard.shouldBlock("https://example.com/pixel/collect")).toBeTrue();
+        expect(PrivacyGuard.shouldBlock("https://example.com/other")).toBeTrue();
       });
     });
   });
@@ -275,16 +280,16 @@ describe("PrivacyGuard hostname matching", () => {
       // Stress the snapshot/restore helpers by mutating order and length within the scoped block.
       BLOCKED_HOSTS.push("extra.invalid");
       BLOCKED_HOSTS.sort();
-      expect(PrivacyGuard.shouldBlock("https://example.com/pixel")).toBe(true);
-      expect(PrivacyGuard.shouldBlock("https://api.example.net/pixel")).toBe(true);
+      expect(PrivacyGuard.shouldBlock("https://example.com/pixel")).toBeTrue();
+      expect(PrivacyGuard.shouldBlock("https://api.example.net/pixel")).toBeTrue();
     });
     expect(BLOCKED_HOSTS).toEqual(baseline);
   });
   test("skips host-based evaluation for special scheme URLs", () => {
     // When no hostname is present, host-based blocking is skipped; other layers decide handling.
-    expect(PrivacyGuard.shouldBlock("about:blank")).toBe(false);
-    expect(PrivacyGuard.shouldBlock("blob:https://example.com/id")).toBe(false);
-    expect(PrivacyGuard.shouldBlock("filesystem:https://example.com/temporary/file")).toBe(false);
+    expect(PrivacyGuard.shouldBlock("about:blank")).toBeFalse();
+    expect(PrivacyGuard.shouldBlock("blob:https://example.com/id")).toBeFalse();
+    expect(PrivacyGuard.shouldBlock("filesystem:https://example.com/temporary/file")).toBeFalse();
   });
   const realHosts = [
     {
@@ -306,9 +311,9 @@ describe("PrivacyGuard hostname matching", () => {
   test.each(realHosts)(
     "blocks real blocklist host %s and its subdomains without false positives",
     ({ pattern, subdomain, lookalike }) => {
-      expect(PrivacyGuard.shouldBlock(`https://${pattern}/track`)).toBe(true);
-      expect(PrivacyGuard.shouldBlock(`https://${subdomain}/track`)).toBe(true);
-      expect(PrivacyGuard.shouldBlock(`https://${lookalike}/track`)).toBe(false);
+      expect(PrivacyGuard.shouldBlock(`https://${pattern}/track`)).toBeTrue();
+      expect(PrivacyGuard.shouldBlock(`https://${subdomain}/track`)).toBeTrue();
+      expect(PrivacyGuard.shouldBlock(`https://${lookalike}/track`)).toBeFalse();
     },
   );
   // Notes for future maintainers:
@@ -383,12 +388,12 @@ describe("URLCleaner.cleanHref", () => {
       },
     ];
 
-    cases.forEach(({ name, input, expected }) => {
+    for (const { name, input, expected } of cases) {
       test(`${name}`, () => {
         const cleaned = URLCleaner.cleanHref(input);
         expect(cleaned).toBe(expected);
       });
-    });
+    }
   });
 });
 
@@ -410,7 +415,7 @@ describe("PrivacyGuard.neutralizeScript", () => {
     const script = document.createElement("script");
     script.src = "https://doubleclick.net/evil.js";
     script.setAttribute("nonce", "abc123");
-    document.body.appendChild(script);
+    document.body.append(script);
 
     const removeSpy = jest.spyOn(script, "remove");
 
@@ -426,7 +431,7 @@ describe("PrivacyGuard.neutralizeScript", () => {
         url: "https://doubleclick.net/evil.js",
       }),
     );
-    expect(script.isConnected).toBe(false);
+    expect(script.isConnected).toBeFalse();
   });
 });
 

@@ -37,7 +37,7 @@ describe("Initialization", () => {
 
     // Assert:
     // Verify the error was caught and logged.
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledOnce();
     expect(errorSpy).toHaveBeenCalledWith(
       "PrivacyGuard: Failed to apply per-host overrides.",
       testError,

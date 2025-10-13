@@ -25,7 +25,7 @@ describe("error utils", () => {
 
     logError("Something failed.", payload);
 
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledOnce();
     const [message, errObj] = errorSpy.mock.calls[0];
     expect(message).toBe("PrivacyGuard: Something failed.");
     expect(errObj).toBeInstanceOf(Error);
@@ -39,7 +39,7 @@ describe("error utils", () => {
     logError("Repeat me", err, { onceKey: "group-1" });
     logError("Repeat me", err, { onceKey: "group-1" });
 
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledOnce();
   });
 
   it("logError can rethrow when requested", async () => {
@@ -48,10 +48,10 @@ describe("error utils", () => {
     expect(() => {
       try {
         throw new Error("kaboom");
-      } catch (err) {
-        logError("Exploding on purpose.", err, { rethrow: true });
+      } catch (error) {
+        logError("Exploding on purpose.", error, { rethrow: true });
       }
     }).toThrow("kaboom");
-    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledOnce();
   });
 });
