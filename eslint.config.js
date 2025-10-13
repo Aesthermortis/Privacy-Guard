@@ -17,6 +17,9 @@ import * as sonarjs from "eslint-plugin-sonarjs";
 import unicornPlugin from "eslint-plugin-unicorn";
 import yml from "eslint-plugin-yml";
 import * as yamlParser from "yaml-eslint-parser";
+import css from "@eslint/css";
+import html from "@html-eslint/eslint-plugin";
+import * as htmlParser from "@html-eslint/parser";
 import stylistic from "@stylistic/eslint-plugin";
 import eslintConfigPrettier from "eslint-config-prettier";
 
@@ -88,6 +91,7 @@ export default defineConfig([
     name: "JavaScript",
     files: ["**/*.{js,jsx,mjs}"],
     ignores: testGlobs,
+    plugins: { html },
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
@@ -100,6 +104,14 @@ export default defineConfig([
     name: "CommonJS",
     files: ["**/*.cjs"],
     extends: [nodePlugin.configs["flat/recommended-script"]],
+  },
+
+  // TypeScript
+  {
+    name: "TypeScript",
+    files: ["**/*.{ts,tsx,mts,cts}"],
+    ignores: testGlobs,
+    plugins: { html },
   },
 
   // Jest
@@ -171,6 +183,35 @@ export default defineConfig([
       parser: yamlParser,
       parserOptions: {
         defaultYAMLVersion: "1.2",
+      },
+    },
+  },
+
+  // CSS
+  {
+    name: "CSS",
+    files: ["**/*.css"],
+    plugins: { css },
+    extends: ["css/recommended"],
+    language: "css/css",
+    rules: {
+      "no-irregular-whitespace": "off",
+    },
+  },
+
+  // HTML
+  {
+    name: "HTML",
+    files: ["**/*.html"],
+    plugins: { html },
+    extends: ["html/recommended"],
+    language: "html/html",
+    languageOptions: {
+      parser: htmlParser,
+      // This tells the parser to treat {{ ... }} as template syntax,
+      // so it won’t try to parse contents inside as regular HTML
+      templateEngineSyntax: {
+        "{{": "}}",
       },
     },
   },

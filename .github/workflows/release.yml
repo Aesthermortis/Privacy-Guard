@@ -37,6 +37,6 @@ jobs:
         run: npm ci --no-audit --fund=false --include=dev
 
       - name: Release
-        run: npx semantic-release
+        run: npx -y semantic-release@24
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
