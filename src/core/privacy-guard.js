@@ -4,6 +4,108 @@ import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js"
 import { EventLog } from "../event-log.js";
 import { URLCleaningRuntime, setShouldBlock } from "../url/runtime.js";
 
+const TRUSTED_TYPES_ERROR_FRAGMENT = "TrustedScriptURL";
+
+/**
+ * Trusted Types helper: wraps script URLs only when Trusted Types are available.
+ * @returns {{ wrapScriptURL: (value: unknown) => unknown }}
+ */
+const TT = (() => {
+  const trustedTypesApi = globalThis.trustedTypes ?? null;
+  let policy = null;
+
+  /**
+   * Produces a Trusted Types compatible script URL when possible.
+   * @param {unknown} value - The candidate script URL.
+   * @returns {unknown} - The wrapped TrustedScriptURL or the original value.
+   */
+  function wrapScriptURL(value) {
+    if (!trustedTypesApi) {
+      return value;
+    }
+    try {
+      policy =
+        policy ||
+        trustedTypesApi.createPolicy("privacy-guard", {
+          createScriptURL: String,
+        });
+      return policy.createScriptURL(String(value));
+    } catch {
+      return value;
+    }
+  }
+
+  return { wrapScriptURL };
+})();
+
+/**
+ * Determines whether the provided error represents a Trusted Types violation.
+ * @param {unknown} error - The error thrown by a Trusted Types violation.
+ * @returns {boolean} - True when the error indicates a Trusted Types violation.
+ */
+const isTrustedTypesViolation = (error) =>
+  error instanceof TypeError &&
+  typeof error.message === "string" &&
+  error.message.includes(TRUSTED_TYPES_ERROR_FRAGMENT);
+
+/**
+ * Removes trailing dots from hostnames to normalize them for comparisons.
+ * @param {string} value - The hostname to normalize.
+ * @returns {string} - The normalized hostname.
+ */
+function normalizeHostname(value) {
+  if (!value) {
+    return "";
+  }
+  return value.endsWith(".") ? value.slice(0, -1) : value;
+}
+
+/**
+ * Checks whether the tail labels in a hostname match the provided pattern.
+ * @param {string} hostname - The hostname to inspect.
+ * @param {string} pattern - The pattern to compare against.
+ * @returns {boolean} - True when the hostname matches the pattern.
+ */
+function hostnameLabelsMatch(hostname, pattern) {
+  const hostParts = hostname.split(".");
+  const patternParts = pattern.split(".");
+  if (patternParts.length < 2 || patternParts.length > hostParts.length) {
+    return false;
+  }
+  const tail = hostParts.slice(-patternParts.length).join(".");
+  return tail === pattern;
+}
+
+/**
+ * Handles Trusted Types violations by logging and neutralizing offending scripts.
+ * @param {HTMLScriptElement | null} script - The script element that triggered the violation.
+ * @param {unknown} value - The value attempted to be assigned to the script source.
+ * @param {string} reason - The interception reason used for logging.
+ * @param {{ neutralizeScript?: (element: HTMLScriptElement) => void } | null} guard - The guard instance managing scripts.
+ */
+function handleTrustedTypesViolation(script, value, reason, guard) {
+  if (!script) {
+    return;
+  }
+  try {
+    EventLog.push({
+      kind: "script",
+      reason,
+      url: typeof value === "string" ? value : String(value),
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    script.removeAttribute("src");
+  } catch {
+    /* ignore */
+  }
+  if (guard && typeof guard.neutralizeScript === "function") {
+    guard.neutralizeScript(script);
+  }
+}
+
 /**
  * Checks if the hostname of a URL object matches any of the given patterns.
  * @param {URL} urlObj - The URL object to check.
@@ -18,23 +120,7 @@ function hostnameMatches(urlObj, patterns = []) {
   if (!host) {
     return false;
   }
-
-  const normalize = (value) => {
-    if (!value) {
-      return "";
-    }
-    return value.endsWith(".") ? value.slice(0, -1) : value;
-  };
-  const labelsMatch = (hostname, pattern) => {
-    const hostParts = hostname.split(".");
-    const patternParts = pattern.split(".");
-    if (patternParts.length < 2 || patternParts.length > hostParts.length) {
-      return false;
-    }
-    const tail = hostParts.slice(-patternParts.length).join(".");
-    return tail === pattern;
-  };
-  const hostNorm = normalize(host);
+  const hostNorm = normalizeHostname(host);
 
   return patterns.some((pattern) => {
     if (!pattern) {
@@ -45,22 +131,22 @@ function hostnameMatches(urlObj, patterns = []) {
       return false;
     }
 
-    const patNorm = normalize(pat);
+    const patNorm = normalizeHostname(pat);
     if (patNorm.startsWith("*.")) {
       const base = patNorm.slice(2);
       if (!base) {
         return false;
       }
-      return hostNorm === base || labelsMatch(hostNorm, base);
+      return hostNorm === base || hostnameLabelsMatch(hostNorm, base);
     }
-    return hostNorm === patNorm || labelsMatch(hostNorm, patNorm);
+    return hostNorm === patNorm || hostnameLabelsMatch(hostNorm, patNorm);
   });
 }
 
 /**
  * Checks if a URL object matches any of the given rules.
  * @param {URL} urlObj - The URL object to check.
- * @param {Object[]} rules - The rules to match against. Each rule should be an object of shape: { host: string, pathStartsWith?: string }
+ * @param {object[]} rules - The rules to match against. Each rule should be an object of shape: { host: string, pathStartsWith?: string }
  * @returns {boolean} - True if the URL matches any rule, false otherwise.
  */
 function urlMatches(urlObj, rules = []) {
@@ -83,6 +169,289 @@ function urlMatches(urlObj, rules = []) {
     return urlObj.pathname.startsWith(prefix);
   });
 }
+
+/**
+ * Returns the browser storage instance when available.
+ * @returns {Storage | null} - The storage instance or null when unavailable.
+ */
+function getChannelStorage() {
+  if (typeof globalThis !== "object" || globalThis === null) {
+    return null;
+  }
+  const storage = Reflect.get(globalThis, "localStorage");
+  if (!storage) {
+    return null;
+  }
+  if (typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
+    return null;
+  }
+  return storage;
+}
+
+const SCRIPT_TAG_NAME = "SCRIPT";
+
+/**
+ * Retrieves the property descriptor for `HTMLScriptElement#src` when available.
+ * @returns {PropertyDescriptor | null} - The descriptor or null if unavailable.
+ */
+function getScriptSrcDescriptor() {
+  if (
+    typeof HTMLScriptElement === "undefined" ||
+    !HTMLScriptElement ||
+    !HTMLScriptElement.prototype
+  ) {
+    return null;
+  }
+  return Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype, "src") || null;
+}
+
+/**
+ * Logs a blocked script event while swallowing logging failures.
+ * @param {string} reason - The blocking reason identifier.
+ * @param {unknown} value - The associated script URL or identifier.
+ */
+function logScriptBlock(reason, value) {
+  try {
+    EventLog.push({ kind: "script", reason, url: String(value ?? "") });
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Schedules the provided callback on the microtask queue when available.
+ * Falls back to a macrotask when microtasks are unavailable.
+ * @param {() => void} callback - The callback to schedule.
+ */
+function scheduleMicrotask(callback) {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(callback);
+    return;
+  }
+  setTimeout(callback, 0);
+}
+
+/**
+ * Adds DOM-style event emitter capabilities to the provided target object.
+ * @param {object} target - The object to enhance with event emitter methods.
+ */
+function installEmitterMethods(target) {
+  const listeners = new Map();
+
+  target.addEventListener = function (type, handler) {
+    const eventType = typeof type === "string" ? type : String(type || "");
+    if (!eventType || typeof handler !== "function") {
+      return;
+    }
+    const handlers = listeners.get(eventType) ?? [];
+    handlers.push(handler);
+    listeners.set(eventType, handlers);
+  };
+
+  target.removeEventListener = function (type, handler) {
+    const eventType = typeof type === "string" ? type : String(type || "");
+    if (!eventType || typeof handler !== "function") {
+      return;
+    }
+    const handlers = listeners.get(eventType);
+    if (!handlers) {
+      return;
+    }
+    const index = handlers.indexOf(handler);
+    if (index !== -1) {
+      handlers.splice(index, 1);
+      if (handlers.length === 0) {
+        listeners.delete(eventType);
+      }
+    }
+  };
+
+  target.dispatchEvent = function (event) {
+    const eventType = typeof event?.type === "string" ? event.type : String(event?.type || "");
+    if (!eventType) {
+      return true;
+    }
+
+    let handled = false;
+    const handlers = listeners.get(eventType);
+    if (handlers) {
+      const snapshot = [...handlers];
+      for (const handler of snapshot) {
+        try {
+          handler.call(target, event);
+          handled = true;
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    const propertyHandler = Reflect.get(target, `on${eventType}`);
+    if (typeof propertyHandler === "function") {
+      try {
+        propertyHandler.call(target, event);
+        handled = true;
+      } catch {
+        /* ignore */
+      }
+    }
+
+    return handled;
+  };
+}
+
+/**
+ * Intercepts `Element#setAttribute` to neutralize blocked scripts.
+ * @param {typeof PrivacyGuard} guard - The guard instance to delegate actions.
+ */
+function interceptScriptSetAttribute(guard) {
+  if (typeof Element === "undefined" || !Element || !Element.prototype) {
+    return;
+  }
+  const elementProto = Element.prototype;
+  if (typeof elementProto.setAttribute !== "function") {
+    return;
+  }
+
+  const originalSetAttribute = elementProto.setAttribute;
+  const scriptSrcDescriptor = getScriptSrcDescriptor();
+  const scriptSrcSetter = scriptSrcDescriptor?.set || null;
+
+  elementProto.setAttribute = function (name, value) {
+    const tagName = this && typeof this.tagName === "string" ? this.tagName.toUpperCase() : "";
+    const attributeName = typeof name === "string" ? name.toLowerCase() : "";
+    const isScriptElement = tagName === SCRIPT_TAG_NAME;
+    const isSrcAttribute = attributeName === "src";
+
+    if (!isScriptElement || !isSrcAttribute) {
+      return Reflect.apply(originalSetAttribute, this, [name, value]);
+    }
+
+    if (guard.shouldBlock(value)) {
+      logScriptBlock("setAttribute", value);
+      guard.neutralizeScript(this);
+      return;
+    }
+
+    if (!scriptSrcSetter) {
+      try {
+        return Reflect.apply(originalSetAttribute, this, [name, value]);
+      } catch (error) {
+        if (isTrustedTypesViolation(error)) {
+          handleTrustedTypesViolation(this, value, "trustedtypes", guard);
+          return;
+        }
+        throw error;
+      }
+    }
+
+    try {
+      Reflect.apply(scriptSrcSetter, this, [TT.wrapScriptURL(value)]);
+    } catch (error) {
+      if (isTrustedTypesViolation(error)) {
+        handleTrustedTypesViolation(this, value, "trustedtypes", guard);
+        return;
+      }
+      throw error;
+    }
+  };
+}
+
+/**
+ * Patches `HTMLScriptElement#src` setter to enforce blocking and Trusted Types.
+ * @param {typeof PrivacyGuard} guard - The guard instance to delegate actions.
+ */
+function patchScriptSrcSetter(guard) {
+  const descriptor = getScriptSrcDescriptor();
+  if (!descriptor || typeof descriptor.set !== "function") {
+    return;
+  }
+
+  Object.defineProperty(HTMLScriptElement.prototype, "src", {
+    configurable: true,
+    enumerable: descriptor.enumerable,
+    get: descriptor.get,
+    set(value) {
+      try {
+        if (guard.shouldBlock(value)) {
+          logScriptBlock("prop:set", value);
+          guard.neutralizeScript(this);
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      try {
+        Reflect.apply(descriptor.set, this, [TT.wrapScriptURL(value)]);
+      } catch (error) {
+        if (isTrustedTypesViolation(error)) {
+          handleTrustedTypesViolation(this, value, "trustedtypes", guard);
+          return;
+        }
+        throw error;
+      }
+    },
+  });
+}
+
+/**
+ * Hooks DOM insertion methods to inspect detached scripts before insertion.
+ * @param {typeof PrivacyGuard} guard - The guard instance to delegate actions.
+ */
+function interceptDomInsertionForScripts(guard) {
+  if (typeof Node === "undefined" || !Node || !Node.prototype) {
+    return;
+  }
+
+  const patchAppendChild = () => {
+    const originalAppendChild = Node.prototype.appendChild;
+    if (typeof originalAppendChild !== "function") {
+      return;
+    }
+    Node.prototype.appendChild = function (node, ...rest) {
+      try {
+        const tagName = node && typeof node.tagName === "string" ? node.tagName.toUpperCase() : "";
+        if (tagName === SCRIPT_TAG_NAME) {
+          const blockedUrl = node.getAttribute("src") || node.src || "";
+          if (guard.shouldBlock(blockedUrl)) {
+            logScriptBlock("dom:appendChild", blockedUrl);
+            guard.neutralizeScript(node);
+            return node;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      return Reflect.apply(originalAppendChild, this, [node, ...rest]);
+    };
+  };
+
+  const patchInsertBefore = () => {
+    const originalInsertBefore = Node.prototype.insertBefore;
+    if (typeof originalInsertBefore !== "function") {
+      return;
+    }
+    Node.prototype.insertBefore = function (node, ...rest) {
+      try {
+        const tagName = node && typeof node.tagName === "string" ? node.tagName.toUpperCase() : "";
+        if (tagName === SCRIPT_TAG_NAME) {
+          const blockedUrl = node.getAttribute("src") || node.src || "";
+          if (guard.shouldBlock(blockedUrl)) {
+            logScriptBlock("dom:insertBefore", blockedUrl);
+            guard.neutralizeScript(node);
+            return node;
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      return Reflect.apply(originalInsertBefore, this, [node, ...rest]);
+    };
+  };
+
+  patchAppendChild();
+  patchInsertBefore();
+}
 export const PrivacyGuard = {
   STATE: {
     channelEnabled: {
@@ -95,28 +464,41 @@ export const PrivacyGuard = {
     if (!this.STATE || !this.STATE.channelEnabled) {
       return false;
     }
-    const channel = this.STATE.channelEnabled;
-    if (!Object.prototype.hasOwnProperty.call(channel, kind)) {
-      return false;
+    if (kind === "ws") {
+      return Boolean(this.STATE.channelEnabled.ws);
     }
-    return !!channel[kind];
+    if (kind === "sse") {
+      return Boolean(this.STATE.channelEnabled.sse);
+    }
+    return false;
   },
 
   setChannelEnabled(kind, enabled) {
     if (!this.STATE || !this.STATE.channelEnabled) {
       return;
     }
-    const channel = this.STATE.channelEnabled;
-    if (!Object.prototype.hasOwnProperty.call(channel, kind)) {
+    const next = Boolean(enabled);
+
+    if (kind === "ws") {
+      if (this.STATE.channelEnabled.ws === next) {
+        return;
+      }
+      this.STATE.channelEnabled.ws = next;
+    } else if (kind === "sse") {
+      if (this.STATE.channelEnabled.sse === next) {
+        return;
+      }
+      this.STATE.channelEnabled.sse = next;
+    } else {
       return;
     }
-    const next = !!enabled;
-    if (channel[kind] === next) {
+
+    const storage = getChannelStorage();
+    if (!storage) {
       return;
     }
-    channel[kind] = next;
     try {
-      localStorage.setItem("PG_channelEnabled", JSON.stringify(channel));
+      storage.setItem("PG_channelEnabled", JSON.stringify(this.STATE.channelEnabled));
     } catch {
       /* ignore */
     }
@@ -126,9 +508,12 @@ export const PrivacyGuard = {
     if (!this.STATE || !this.STATE.channelEnabled) {
       return;
     }
-    const channel = this.STATE.channelEnabled;
+    const storage = getChannelStorage();
+    if (!storage) {
+      return;
+    }
     try {
-      const raw = localStorage.getItem("PG_channelEnabled");
+      const raw = storage.getItem("PG_channelEnabled");
       if (!raw) {
         return;
       }
@@ -136,10 +521,11 @@ export const PrivacyGuard = {
       if (!parsed || typeof parsed !== "object") {
         return;
       }
-      for (const key of Object.keys(channel)) {
-        if (Object.prototype.hasOwnProperty.call(parsed, key)) {
-          channel[key] = !!parsed[key];
-        }
+      if (Object.prototype.hasOwnProperty.call(parsed, "ws")) {
+        this.STATE.channelEnabled.ws = Boolean(parsed.ws);
+      }
+      if (Object.prototype.hasOwnProperty.call(parsed, "sse")) {
+        this.STATE.channelEnabled.sse = Boolean(parsed.sse);
       }
     } catch {
       /* ignore */
@@ -224,12 +610,14 @@ export const PrivacyGuard = {
     if (!originalCreateElement || !hasDoc) {
       return;
     }
-    const self = this;
+    const scriptSrcDescriptor = getScriptSrcDescriptor();
+    const scriptSrcSetter = scriptSrcDescriptor?.set || null;
+    const scriptSrcGetter = scriptSrcDescriptor?.get || null;
 
     // Patch only script element creation to avoid breaking other element types
     document.createElement = function (...args) {
       const tagName = args[0] ? String(args[0]).toLowerCase() : "";
-      const element = originalCreateElement.apply(this, args);
+      const element = Reflect.apply(originalCreateElement, this, args);
 
       if (tagName === "script") {
         try {
@@ -238,23 +626,34 @@ export const PrivacyGuard = {
             enumerable: true,
             set(value) {
               try {
-                if (self.shouldBlock(value)) {
+                if (PrivacyGuard.shouldBlock(value)) {
                   console.debug("[Privacy Guard] Prevented script creation:", value);
-                  EventLog.push({ kind: "script", reason: "createElement", url: String(value) });
-                  // Set a non-executable type to neutralize the script
-                  element.setAttribute("type", "text/plain");
-                  // Return to prevent the `src` attribute from being set, which would
-                  // trigger a network request and leak the user's IP address.
+                  logScriptBlock("createElement", value);
+                  this.setAttribute("type", "text/plain");
                   return;
                 }
-                // Set the original value (or let it be handled by the neutralized type)
-                element.setAttribute("src", value);
               } catch {
-                element.setAttribute("src", value);
+                /* ignore guard failures but still attempt assignment */
+              }
+              try {
+                if (scriptSrcSetter) {
+                  Reflect.apply(scriptSrcSetter, this, [TT.wrapScriptURL(value)]);
+                  return;
+                }
+                return;
+              } catch (error) {
+                if (isTrustedTypesViolation(error)) {
+                  handleTrustedTypesViolation(this, value, "trustedtypes", PrivacyGuard);
+                  return;
+                }
+                throw error;
               }
             },
             get() {
-              return element.getAttribute("src");
+              if (scriptSrcGetter) {
+                return Reflect.apply(scriptSrcGetter, this, []);
+              }
+              return this.getAttribute("src");
             },
           });
         } catch {
@@ -277,106 +676,9 @@ export const PrivacyGuard = {
       return;
     }
     this._scriptHardeningApplied = true;
-    const guard = this;
-
-    // Intercept attribute-based assignment
-    const elementProto = typeof Element !== "undefined" ? Element.prototype : null;
-    if (elementProto && elementProto.setAttribute) {
-      const originalSetAttribute = elementProto.setAttribute;
-      elementProto.setAttribute = function (name, value) {
-        try {
-          if (
-            this &&
-            typeof this.tagName === "string" &&
-            this.tagName.toUpperCase() === "SCRIPT" &&
-            typeof name === "string" &&
-            name.toLowerCase() === "src"
-          ) {
-            if (guard.shouldBlock(value)) {
-              const blockedUrl = String(value);
-              guard.neutralizeScript(this);
-              try {
-                EventLog.push({ kind: "script", reason: "setAttribute", url: blockedUrl });
-              } catch {
-                /* ignore */
-              }
-              return;
-            }
-          }
-        } catch {
-          /* ignore */
-        }
-        return originalSetAttribute.call(this, name, value);
-      };
-    }
-
-    // Intercept property-based assignment at prototype level
-    const scriptProto =
-      typeof HTMLScriptElement !== "undefined" && HTMLScriptElement
-        ? HTMLScriptElement.prototype
-        : null;
-    if (scriptProto) {
-      const descriptor = Object.getOwnPropertyDescriptor(scriptProto, "src");
-      if (descriptor && typeof descriptor.set === "function") {
-        Object.defineProperty(scriptProto, "src", {
-          configurable: true,
-          enumerable: descriptor.enumerable,
-          get: descriptor.get,
-          set(value) {
-            try {
-              if (guard.shouldBlock(value)) {
-                const blockedUrl = String(value);
-                guard.neutralizeScript(this);
-                try {
-                  EventLog.push({ kind: "script", reason: "prop:set", url: blockedUrl });
-                } catch {
-                  /* ignore */
-                }
-                return;
-              }
-            } catch {
-              /* ignore */
-            }
-            descriptor.set.call(this, value);
-          },
-        });
-      }
-    }
-
-    // Intercept node insertion to inspect detached SCRIPTs
-    const intercept = (Proto, method) => {
-      if (!Proto || !Proto.prototype) {
-        return;
-      }
-      const original = Proto.prototype[method];
-      if (typeof original !== "function") {
-        return;
-      }
-      Proto.prototype[method] = function (node, ...rest) {
-        try {
-          if (node && typeof node.tagName === "string" && node.tagName.toUpperCase() === "SCRIPT") {
-            const blockedUrl = node.getAttribute("src") || node.src || "";
-            if (guard.shouldBlock(blockedUrl)) {
-              guard.neutralizeScript(node);
-              try {
-                EventLog.push({ kind: "script", reason: "dom:" + method, url: String(blockedUrl) });
-              } catch {
-                /* ignore */
-              }
-              return node;
-            }
-          }
-        } catch {
-          /* ignore */
-        }
-        return original.call(this, node, ...rest);
-      };
-    };
-
-    if (typeof Node !== "undefined" && Node && Node.prototype) {
-      intercept(Node, "appendChild");
-      intercept(Node, "insertBefore");
-    }
+    interceptScriptSetAttribute(PrivacyGuard);
+    patchScriptSrcSetter(PrivacyGuard);
+    interceptDomInsertionForScripts(PrivacyGuard);
   },
 
   /**
@@ -424,7 +726,7 @@ export const PrivacyGuard = {
 
     // Scan children of the node
     const elements = node.querySelectorAll("iframe[src], script[src]");
-    elements.forEach((el) => {
+    for (const el of elements) {
       if (this.shouldBlock(el.src)) {
         if (el.tagName === "SCRIPT") {
           this.neutralizeScript(el);
@@ -432,7 +734,7 @@ export const PrivacyGuard = {
           this.removeNode(el, el.tagName.toLowerCase());
         }
       }
-    });
+    }
   },
 
   /**
@@ -449,48 +751,48 @@ export const PrivacyGuard = {
     const pending = new Set();
     let scheduled = false;
 
+    const runPending = () => {
+      scheduled = false;
+      if (pending.size === 0) {
+        return;
+      }
+
+      const roots = [];
+      for (const node of pending) {
+        if (!hasElementCtor || !(node instanceof Element) || !node.isConnected) {
+          continue;
+        }
+        if (roots.some((existing) => existing.contains(node))) {
+          continue;
+        }
+        if (roots.length > 0) {
+          const filteredRoots = roots.filter((existing) => !node.contains(existing));
+          roots.length = 0;
+          roots.push(...filteredRoots);
+        }
+        roots.push(node);
+      }
+
+      pending.clear();
+
+      if (roots.length === 0) {
+        return;
+      }
+
+      for (const root of roots) {
+        this.scanNodeForBlockedElements(root);
+      }
+
+      if (pending.size > 0) {
+        schedule();
+      }
+    };
+
     const schedule = () => {
-      const run = () => {
-        scheduled = false;
-        if (!pending.size) {
-          return;
-        }
-
-        const roots = [];
-        for (const node of pending) {
-          if (!hasElementCtor || !(node instanceof Element) || !node.isConnected) {
-            continue;
-          }
-          if (roots.some((existing) => existing.contains(node))) {
-            continue;
-          }
-          for (let i = roots.length - 1; i >= 0; i -= 1) {
-            if (node.contains(roots[i])) {
-              roots.splice(i, 1);
-            }
-          }
-          roots.push(node);
-        }
-
-        pending.clear();
-
-        if (!roots.length) {
-          return;
-        }
-
-        for (const root of roots) {
-          this.scanNodeForBlockedElements(root);
-        }
-
-        if (pending.size) {
-          schedule();
-        }
-      };
-
-      if ("requestIdleCallback" in window) {
-        requestIdleCallback(() => run(), { timeout: 50 });
+      if ("requestIdleCallback" in globalThis) {
+        requestIdleCallback(runPending, { timeout: 50 });
       } else {
-        requestAnimationFrame(() => run());
+        requestAnimationFrame(runPending);
       }
     };
 
@@ -519,7 +821,7 @@ export const PrivacyGuard = {
         pending.add(node);
       }
 
-      if (!scheduled && pending.size) {
+      if (!scheduled && pending.size > 0) {
         scheduled = true;
         schedule();
       }
@@ -527,7 +829,10 @@ export const PrivacyGuard = {
 
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
-        mutation.addedNodes?.forEach(collectNode);
+        const addedNodes = mutation.addedNodes || [];
+        for (const added of addedNodes) {
+          collectNode(added);
+        }
       }
     });
 
@@ -541,16 +846,27 @@ export const PrivacyGuard = {
    * Intercepts `fetch` requests to block trackers.
    */
   interceptFetch() {
-    const originalFetch = window.fetch ? window.fetch.bind(window) : null;
+    const originalFetch = typeof globalThis.fetch === "function" ? globalThis.fetch : null;
     if (!originalFetch) {
       return;
     }
-    const guard = this;
-    window.fetch = function (...args) {
+    globalThis.fetch = function (...args) {
       const [input] = args;
-      const url = typeof input === "string" ? input : input && input.url ? input.url : "";
+      let url = "";
+      if (typeof input === "string") {
+        url = input;
+      } else if (input && typeof input.url === "string") {
+        url = input.url;
+      } else if (
+        input &&
+        typeof input === "object" &&
+        Object.prototype.hasOwnProperty.call(input, "url") &&
+        input.url != null
+      ) {
+        url = String(input.url);
+      }
 
-      if (guard.shouldBlock(url)) {
+      if (PrivacyGuard.shouldBlock(url)) {
         console.debug("[Privacy Guard] Blocked fetch:", url);
         EventLog.push({ kind: "fetch", reason: MODE.networkBlock, url: String(url) });
         if (MODE.networkBlock === "silent") {
@@ -559,27 +875,33 @@ export const PrivacyGuard = {
         return Promise.reject(new TypeError("PrivacyGuard blocked: " + url));
       }
 
-      return originalFetch(...args);
+      return Reflect.apply(originalFetch, this ?? globalThis, args);
     };
   },
   /**
    * Intercepts `navigator.sendBeacon` calls.
    */
   interceptBeacon() {
-    const originalSendBeacon = navigator.sendBeacon ? navigator.sendBeacon.bind(navigator) : null;
+    const nav =
+      typeof globalThis === "object" && globalThis ? Reflect.get(globalThis, "navigator") : null;
+    if (!nav) {
+      return;
+    }
+    const originalSendBeacon =
+      typeof nav.sendBeacon === "function" ? nav.sendBeacon.bind(nav) : null;
     if (!originalSendBeacon) {
       return;
     }
 
-    navigator.sendBeacon = (url, data) => {
-      if (this.shouldBlock(url)) {
+    Reflect.set(nav, "sendBeacon", (url, data) => {
+      if (PrivacyGuard.shouldBlock(url)) {
         console.debug("[Privacy Guard] Blocked beacon:", url);
         EventLog.push({ kind: "beacon", reason: "blocked", url: String(url) });
         // Indicate failure so sites don't assume it worked.
         return false;
       }
-      return originalSendBeacon(url, data);
-    };
+      return Reflect.apply(originalSendBeacon, nav, [url, data]);
+    });
   },
 
   /**
@@ -589,29 +911,40 @@ export const PrivacyGuard = {
   interceptXHR() {
     const originalOpen = XMLHttpRequest.prototype.open;
     const originalSend = XMLHttpRequest.prototype.send;
-    const self = this; // Reference to PrivacyGuard object
     const PRIVACY_GUARD_URL = Symbol("privacyGuardUrl");
 
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
       // Store URL on a non-enumerable, collision-proof key
       try {
-        this[PRIVACY_GUARD_URL] = url;
+        Reflect.defineProperty(this, PRIVACY_GUARD_URL, {
+          configurable: true,
+          enumerable: false,
+          writable: true,
+          value: url,
+        });
       } catch {
         /* ignore */
       }
-      originalOpen.apply(this, [method, url, ...rest]);
+      Reflect.apply(originalOpen, this, [method, url, ...rest]);
     };
 
     XMLHttpRequest.prototype.send = function (...args) {
-      if (this[PRIVACY_GUARD_URL] && self.shouldBlock(String(this[PRIVACY_GUARD_URL]))) {
-        console.debug("[Privacy Guard] Blocked XHR:", this[PRIVACY_GUARD_URL]);
+      let requestUrl = null;
+      try {
+        requestUrl = Reflect.get(this, PRIVACY_GUARD_URL);
+      } catch {
+        requestUrl = null;
+      }
+
+      if (requestUrl && PrivacyGuard.shouldBlock(String(requestUrl))) {
+        console.debug("[Privacy Guard] Blocked XHR:", requestUrl);
         EventLog.push({
           kind: "xhr",
           reason: MODE.networkBlock,
-          url: String(this[PRIVACY_GUARD_URL]),
+          url: String(requestUrl),
         });
         // Emulate real network failure: dispatch 'error' and 'abort', then 'loadend'
-        Promise.resolve().then(() => {
+        scheduleMicrotask(() => {
           try {
             this.dispatchEvent(new ProgressEvent("error"));
           } catch {
@@ -628,9 +961,22 @@ export const PrivacyGuard = {
             /* ignore */
           }
         });
+        try {
+          Reflect.deleteProperty(this, PRIVACY_GUARD_URL);
+        } catch {
+          /* ignore */
+        }
         return;
       }
-      originalSend.apply(this, args);
+      try {
+        Reflect.apply(originalSend, this, args);
+      } finally {
+        try {
+          Reflect.deleteProperty(this, PRIVACY_GUARD_URL);
+        } catch {
+          /* ignore */
+        }
+      }
     };
   },
 
@@ -640,73 +986,19 @@ export const PrivacyGuard = {
    * @returns {void}
    */
   interceptEventSource() {
-    if (window.EventSource && window.EventSource.__PG_isPatched === true) {
+    const eventSourceCtor = Reflect.get(globalThis, "EventSource");
+    if (!eventSourceCtor) {
+      return;
+    }
+    if (eventSourceCtor.__PG_isPatched === true) {
       return;
     }
 
     const OriginalEventSource =
-      (window.EventSource && window.EventSource.__PG_original) || window.EventSource;
+      (eventSourceCtor && eventSourceCtor.__PG_original) || eventSourceCtor;
     if (!OriginalEventSource) {
       return;
     }
-    const guard = this;
-
-    /**
-     * Creates a custom event emitter for the given target.
-     * @param {*} target - The target object to enhance with event emitter capabilities.
-     */
-    function makeEmitter(target) {
-      const listeners = new Map();
-      target.addEventListener = function (type, handler) {
-        if (!type || typeof handler !== "function") {
-          return;
-        }
-        const arr = listeners.get(type) || [];
-        arr.push(handler);
-        listeners.set(type, arr);
-      };
-      target.removeEventListener = function (type, handler) {
-        const arr = listeners.get(type) || [];
-        const idx = arr.indexOf(handler);
-        if (idx >= 0) {
-          arr.splice(idx, 1);
-        }
-      };
-      target.dispatchEvent = function (evt) {
-        const type = evt && evt.type ? String(evt.type) : "";
-        const arr = listeners.get(type) || [];
-        for (const h of arr.slice()) {
-          try {
-            h.call(target, evt);
-          } catch {
-            /* ignore */
-          }
-        }
-        const onprop = "on" + type;
-        if (typeof target[onprop] === "function") {
-          try {
-            target[onprop].call(target, evt);
-          } catch {
-            /* ignore */
-          }
-        }
-        return true;
-      };
-    }
-
-    /**
-     * Schedules a function to be executed in the next microtask.
-     * @param {Function} fn - The function to schedule.
-     * @returns {void}
-     */
-    function schedule(fn) {
-      if (typeof queueMicrotask === "function") {
-        queueMicrotask(fn);
-        return;
-      }
-      Promise.resolve().then(fn);
-    }
-
     /**
      * Creates a blocked stub for the EventSource.
      * @param {string} urlString - The URL of the EventSource.
@@ -716,20 +1008,17 @@ export const PrivacyGuard = {
      */
     function createBlockedStub(urlString, mode, init) {
       const stub = Object.create(OriginalEventSource.prototype);
-      makeEmitter(stub);
+      installEmitterMethods(stub);
 
       stub.url = String(urlString);
       stub.withCredentials = Boolean(init && init.withCredentials);
       stub.readyState = OriginalEventSource.CLOSED;
-      stub.onopen = null;
-      stub.onmessage = null;
-      stub.onerror = null;
       stub.close = function () {
         /* no-op */
       };
 
       if (mode !== "silent") {
-        schedule(() => {
+        scheduleMicrotask(() => {
           try {
             stub.dispatchEvent(new Event("error"));
           } catch {
@@ -750,13 +1039,13 @@ export const PrivacyGuard = {
      * @returns {EventSource} - A real EventSource or a blocked stub.
      */
     function wrap(url, init) {
-      if (!guard.isChannelEnabled("sse")) {
-        return arguments.length === 1 || typeof init === "undefined"
+      if (!PrivacyGuard.isChannelEnabled("sse")) {
+        return arguments.length === 1 || init === undefined
           ? new OriginalEventSource(url)
           : new OriginalEventSource(url, init);
       }
       const urlString = String(url);
-      if (guard.shouldBlock(urlString)) {
+      if (PrivacyGuard.shouldBlock(urlString)) {
         try {
           console.debug("[Privacy Guard] Blocked EventSource:", urlString);
         } catch {
@@ -775,7 +1064,7 @@ export const PrivacyGuard = {
         throw new TypeError("PrivacyGuard blocked EventSource: " + urlString);
       }
 
-      if (arguments.length === 1 || typeof init === "undefined") {
+      if (arguments.length === 1 || init === undefined) {
         return new OriginalEventSource(url);
       }
       return new OriginalEventSource(url, init);
@@ -789,7 +1078,7 @@ export const PrivacyGuard = {
     Object.defineProperty(wrap, "__PG_isPatched", { value: true });
     Object.defineProperty(wrap, "__PG_original", { value: OriginalEventSource });
 
-    window.EventSource = wrap;
+    Reflect.set(globalThis, "EventSource", wrap);
   },
 
   /**
@@ -799,79 +1088,24 @@ export const PrivacyGuard = {
    * @returns {void}
    */
   interceptWebSocket() {
-    const alreadyPatched = window.WebSocket && window.WebSocket.__PG_isPatched === true;
-    if (alreadyPatched) {
+    const webSocketCtor = Reflect.get(globalThis, "WebSocket");
+    if (!webSocketCtor) {
+      return;
+    }
+    if (webSocketCtor.__PG_isPatched === true) {
       return;
     }
 
-    const OriginalWebSocket =
-      (window.WebSocket && window.WebSocket.__PG_original) || window.WebSocket;
+    const OriginalWebSocket = (webSocketCtor && webSocketCtor.__PG_original) || webSocketCtor;
     if (!OriginalWebSocket) {
       return;
-    }
-    const guard = this;
-
-    /**
-     * Enhances the given target object with event emitter capabilities by adding
-     * addEventListener, removeEventListener, and dispatchEvent methods.
-     * @param {*} target - The object to enhance with event emitter functionality.
-     */
-    function makeEmitter(target) {
-      const listeners = new Map();
-      target.addEventListener = function (type, handler) {
-        if (!type || typeof handler !== "function") {
-          return;
-        }
-        const handlers = listeners.get(type) || [];
-        handlers.push(handler);
-        listeners.set(type, handlers);
-      };
-      target.removeEventListener = function (type, handler) {
-        const handlers = listeners.get(type) || [];
-        const index = handlers.indexOf(handler);
-        if (index >= 0) {
-          handlers.splice(index, 1);
-        }
-      };
-      target.dispatchEvent = function (event) {
-        const type = event && event.type ? String(event.type) : "";
-        const handlers = listeners.get(type) || [];
-        for (const handler of handlers.slice()) {
-          try {
-            handler.call(target, event);
-          } catch {
-            /* ignore */
-          }
-        }
-        const prop = "on" + type;
-        if (typeof target[prop] === "function") {
-          try {
-            target[prop].call(target, event);
-          } catch {
-            /* ignore */
-          }
-        }
-        return true;
-      };
-    }
-
-    /**
-     * Schedules a function to be executed in the next microtask.
-     * @param {Function} fn - The function to schedule.
-     */
-    function schedule(fn) {
-      if (typeof queueMicrotask === "function") {
-        queueMicrotask(fn);
-        return;
-      }
-      Promise.resolve().then(fn);
     }
 
     const canCloseEvent = typeof CloseEvent === "function";
 
     /**
      * Dispatches a 'close' event on the given WebSocket stub, optionally indicating if the connection was clean.
-     * @param {*} target - The WebSocket stub object to dispatch the event on.
+     * @param {object} target - The WebSocket stub object to dispatch the event on.
      * @param {boolean} wasClean - Whether the connection was closed cleanly.
      */
     function dispatchClose(target, wasClean) {
@@ -896,7 +1130,7 @@ export const PrivacyGuard = {
      */
     function createBlockedStub(url, mode) {
       const stub = Object.create(OriginalWebSocket.prototype);
-      makeEmitter(stub);
+      installEmitterMethods(stub);
 
       stub.url = String(url);
       stub.readyState = OriginalWebSocket.CLOSED;
@@ -911,7 +1145,7 @@ export const PrivacyGuard = {
         /* drop silently */
       };
 
-      schedule(() => {
+      scheduleMicrotask(() => {
         try {
           if (mode === "silent") {
             dispatchClose(stub, true);
@@ -936,13 +1170,13 @@ export const PrivacyGuard = {
      * @returns {WebSocket} - A real WebSocket or a blocked stub.
      */
     function wrap(url, protocols) {
-      if (!guard.isChannelEnabled("ws")) {
-        return arguments.length === 1 || typeof protocols === "undefined"
+      if (!PrivacyGuard.isChannelEnabled("ws")) {
+        return arguments.length === 1 || protocols === undefined
           ? new OriginalWebSocket(url)
           : new OriginalWebSocket(url, protocols);
       }
       const urlString = String(url);
-      if (guard.shouldBlock(urlString)) {
+      if (PrivacyGuard.shouldBlock(urlString)) {
         try {
           console.debug("[Privacy Guard] Blocked WebSocket:", urlString);
         } catch {
@@ -961,7 +1195,7 @@ export const PrivacyGuard = {
         throw new TypeError("PrivacyGuard blocked WebSocket: " + urlString);
       }
 
-      if (arguments.length === 1 || typeof protocols === "undefined") {
+      if (arguments.length === 1 || protocols === undefined) {
         return new OriginalWebSocket(url);
       }
       return new OriginalWebSocket(url, protocols);
@@ -976,14 +1210,16 @@ export const PrivacyGuard = {
     Object.defineProperty(wrap, "__PG_isPatched", { value: true });
     Object.defineProperty(wrap, "__PG_original", { value: OriginalWebSocket });
 
-    window.WebSocket = wrap;
+    Reflect.set(globalThis, "WebSocket", wrap);
 
+    const mozWebSocket = Reflect.get(globalThis, "MozWebSocket");
+    const currentWebSocket = Reflect.get(globalThis, "WebSocket");
     if (
-      "MozWebSocket" in window &&
-      (window.MozWebSocket === OriginalWebSocket ||
-        window.MozWebSocket === window.WebSocket.__PG_original)
+      mozWebSocket &&
+      (mozWebSocket === OriginalWebSocket ||
+        (currentWebSocket && mozWebSocket === currentWebSocket.__PG_original))
     ) {
-      window.MozWebSocket = wrap;
+      Reflect.set(globalThis, "MozWebSocket", wrap);
     }
   },
 
@@ -1018,9 +1254,11 @@ export const PrivacyGuard = {
     URLCleaningRuntime.init();
 
     // One full scan when the page is stable
-    window.addEventListener("load", () =>
-      this.scanNodeForBlockedElements(document.documentElement),
-    );
+    if (typeof globalThis.addEventListener === "function") {
+      globalThis.addEventListener("load", () =>
+        this.scanNodeForBlockedElements(document.documentElement),
+      );
+    }
   },
 };
 
