@@ -1,6 +1,6 @@
 {
   "name": "privacy-guard-userscript",
-  "version": "1.0.0",
+  "version": "1.10.0",
   "description": "UserScript to enhance privacy protection across websites.",
   "type": "module",
   "engines": {
