@@ -2,6 +2,7 @@ import { MODE, CONFIG } from "../config.js";
 import { BLOCKED_HOSTS, BLOCKED_RULES } from "../blocklist.js";
 import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js";
 import { EventLog } from "../event-log.js";
+import { ImgPixelBlocker } from "../features/img-pixel-blocker.js";
 import { URLCleaningRuntime, setShouldBlock } from "../url/runtime.js";
 
 const TRUSTED_TYPES_ERROR_FRAGMENT = "TrustedScriptURL";
@@ -188,6 +189,7 @@ function getChannelStorage() {
   return storage;
 }
 
+const FEATURE_FLAG_STORAGE_KEY = "PG_featureFlags";
 const SCRIPT_TAG_NAME = "SCRIPT";
 
 /**
@@ -458,7 +460,12 @@ export const PrivacyGuard = {
       ws: true,
       sse: true,
     },
+    featureEnabled: {
+      imgPixels: true,
+    },
   },
+
+  imgPixelBlocker: new ImgPixelBlocker(),
 
   isChannelEnabled(kind) {
     if (!this.STATE || !this.STATE.channelEnabled) {
@@ -469,6 +476,16 @@ export const PrivacyGuard = {
     }
     if (kind === "sse") {
       return Boolean(this.STATE.channelEnabled.sse);
+    }
+    return false;
+  },
+
+  isFeatureEnabled(feature) {
+    if (!this.STATE || !this.STATE.featureEnabled) {
+      return false;
+    }
+    if (feature === "imgPixels") {
+      return Boolean(this.STATE.featureEnabled.imgPixels);
     }
     return false;
   },
@@ -529,6 +546,85 @@ export const PrivacyGuard = {
       }
     } catch {
       /* ignore */
+    }
+  },
+
+  setFeatureEnabled(feature, enabled) {
+    if (!this.STATE || !this.STATE.featureEnabled) {
+      return;
+    }
+    if (!Object.prototype.hasOwnProperty.call(this.STATE.featureEnabled, feature)) {
+      return;
+    }
+    const next = Boolean(enabled);
+    if (this.STATE.featureEnabled[feature] === next) {
+      return;
+    }
+    this.STATE.featureEnabled[feature] = next;
+    this.applyFeatureState(feature);
+
+    const storage = getChannelStorage();
+    if (!storage) {
+      return;
+    }
+    try {
+      const payload = {};
+      for (const key of Object.keys(this.STATE.featureEnabled)) {
+        payload[key] = Boolean(this.STATE.featureEnabled[key]);
+      }
+      storage.setItem(FEATURE_FLAG_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      /* ignore */
+    }
+  },
+
+  loadFeatureFlags() {
+    if (!this.STATE || !this.STATE.featureEnabled) {
+      return;
+    }
+    const storage = getChannelStorage();
+    if (!storage) {
+      return;
+    }
+    try {
+      const raw = storage.getItem(FEATURE_FLAG_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") {
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(parsed, "imgPixels")) {
+        this.STATE.featureEnabled.imgPixels = Boolean(parsed.imgPixels);
+      }
+    } catch {
+      /* ignore */
+    }
+  },
+
+  applyFeatureState(feature) {
+    if (!this.STATE || !this.STATE.featureEnabled) {
+      return;
+    }
+    if (feature === "imgPixels") {
+      if (this.STATE.featureEnabled.imgPixels) {
+        this.imgPixelBlocker.enable({
+          shouldBlock: (url) => this.shouldBlock(url),
+          log: EventLog.push,
+        });
+      } else {
+        this.imgPixelBlocker.disable();
+      }
+    }
+  },
+
+  applyAllFeatureStates() {
+    if (!this.STATE || !this.STATE.featureEnabled) {
+      return;
+    }
+    for (const feature of Object.keys(this.STATE.featureEnabled)) {
+      this.applyFeatureState(feature);
     }
   },
   /**
@@ -1233,6 +1329,8 @@ export const PrivacyGuard = {
     this._initialized = true;
 
     this.loadChannelEnabled();
+    this.loadFeatureFlags();
+    this.applyAllFeatureStates();
 
     // Script interception (strategy selectable)
     if (CONFIG.scriptBlockMode === "createElement") {

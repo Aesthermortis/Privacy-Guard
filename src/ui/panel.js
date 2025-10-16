@@ -6,6 +6,7 @@ import { MODE, CONFIG, FEATURES, applyOverridesForHost } from "../config.js";
 import { EventLog } from "../event-log.js";
 import { PrivacyGuard } from "../core/privacy-guard.js";
 import { createChannelToggles } from "./widgets/ChannelToggles.js";
+import { createFeatureToggles } from "./widgets/FeatureToggles.js";
 
 /**
  * Determines whether the received keyboard event matches the configured hotkey.
@@ -41,7 +42,9 @@ export function setupUIPanel() {
     let root = null;
     let visible = false;
     PrivacyGuard.loadChannelEnabled();
+    PrivacyGuard.loadFeatureFlags();
     const channelToggles = createChannelToggles(PrivacyGuard);
+    const featureToggles = createFeatureToggles(PrivacyGuard);
 
     /**
      * Ensures the Privacy Guard panel stylesheet is injected into the document.
@@ -97,6 +100,10 @@ export function setupUIPanel() {
           <div class="pg-kv pg-network-toggles"><div>Channels</div>
             <div class="pg-switch-help">Per site (this domain only)</div>
             <div class="pg-switch-mount"></div>
+          </div>
+          <div class="pg-kv pg-feature-toggles"><div>Protections</div>
+            <div class="pg-switch-help">Per site (this domain only)</div>
+            <div class="pg-feature-switch-mount"></div>
           </div>
           <div class="pg-kv"><div>Script mode</div>
             <div>
@@ -235,6 +242,12 @@ export function setupUIPanel() {
         mount.textContent = "";
         mount.append(channelToggles.element);
         channelToggles.syncFromState();
+      }
+      const featureMount = root.querySelector(".pg-feature-switch-mount");
+      if (featureMount) {
+        featureMount.textContent = "";
+        featureMount.append(featureToggles.element);
+        featureToggles.syncFromState();
       }
     }
 
