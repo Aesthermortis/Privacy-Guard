@@ -20,7 +20,7 @@ export const EventLog = (() => {
    * @returns {Record<string, unknown>[]} Copied array of stored events.
    */
   function list() {
-    return events.slice().reverse();
+    return events.toReversed();
   }
   return { push, list };
 })();
