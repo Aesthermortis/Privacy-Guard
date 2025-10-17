@@ -1,7 +1,7 @@
 import { jest } from "@jest/globals";
 import { PrivacyGuard } from "../../src/core/privacy-guard.js";
 import { EventLog } from "../../src/event-log.js";
-import { CONFIG } from "../../src/config.js";
+import { CONFIG, MODE } from "../../src/config.js";
 import { BLOCKED_HOSTS, BLOCKED_RULES } from "../../src/blocklist.js";
 import { URLCleaner } from "../../src/url/cleaner.js";
 
@@ -474,5 +474,121 @@ describe("PrivacyGuard.interceptElementCreation", () => {
 
     expect(setAttributeSpy).toHaveBeenCalledWith("type", "text/plain");
     expect(setAttributeSpy).not.toHaveBeenCalledWith("src", "https://evil-tracker.com/track.js");
+  });
+});
+
+describe("PrivacyGuard.interceptFetch", () => {
+  let environmentFetch;
+  let environmentResponse;
+  let responseShimCreated = false;
+  let mockOriginalFetch;
+  let shouldBlockSpy;
+  let eventLogSpy;
+  let originalNetworkMode;
+
+  beforeAll(() => {
+    environmentFetch = globalThis.fetch;
+    environmentResponse = globalThis.Response;
+    if (typeof environmentResponse !== "function") {
+      responseShimCreated = true;
+      globalThis.Response = class ResponseShim {
+        constructor(body, init = {}) {
+          this.body = body;
+          this.status = init.status ?? 200;
+          this.statusText = init.statusText ?? "";
+        }
+      };
+    }
+  });
+
+  afterAll(() => {
+    globalThis.fetch = environmentFetch;
+    if (responseShimCreated) {
+      delete globalThis.Response;
+    } else {
+      globalThis.Response = environmentResponse;
+    }
+  });
+
+  beforeEach(() => {
+    originalNetworkMode = MODE.networkBlock;
+    mockOriginalFetch = jest
+      .fn()
+      .mockResolvedValue(new Response("ok", { status: 200, statusText: "OK" }));
+    globalThis.fetch = mockOriginalFetch;
+    shouldBlockSpy = jest.spyOn(PrivacyGuard, "shouldBlock");
+    eventLogSpy = jest.spyOn(EventLog, "push").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    if (shouldBlockSpy) {
+      shouldBlockSpy.mockRestore();
+      shouldBlockSpy = undefined;
+    }
+    if (eventLogSpy) {
+      eventLogSpy.mockRestore();
+      eventLogSpy = undefined;
+    }
+    globalThis.fetch = environmentFetch;
+    MODE.networkBlock = originalNetworkMode;
+  });
+
+  test("should reject fetch when tracker detected in fail mode", async () => {
+    MODE.networkBlock = "fail";
+    shouldBlockSpy.mockReturnValue(true);
+
+    PrivacyGuard.interceptFetch();
+
+    // Use Jest's promise rejection matcher to avoid conditional expects
+    await expect(globalThis.fetch("https://tracker.example/collect")).rejects.toThrow(
+      "PrivacyGuard blocked: https://tracker.example/collect",
+    );
+
+    expect(mockOriginalFetch).not.toHaveBeenCalled();
+    expect(eventLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "fetch",
+        reason: "fail",
+        url: "https://tracker.example/collect",
+      }),
+    );
+  });
+
+  test("should return no content response when tracker detected in silent mode", async () => {
+    MODE.networkBlock = "silent";
+    const requestLike = { url: new URL("https://tracker.example/script.js") };
+    shouldBlockSpy.mockReturnValueOnce(true);
+
+    PrivacyGuard.interceptFetch();
+
+    const response = await globalThis.fetch(requestLike);
+
+    expect(shouldBlockSpy).toHaveBeenCalledWith("https://tracker.example/script.js");
+    expect(response).toBeInstanceOf(Response);
+    expect(response.status).toBe(204);
+    expect(eventLogSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "fetch",
+        reason: "silent",
+        url: "https://tracker.example/script.js",
+      }),
+    );
+    expect(mockOriginalFetch).not.toHaveBeenCalled();
+  });
+
+  test("should forward to original fetch when url is allowed", async () => {
+    MODE.networkBlock = "fail";
+    shouldBlockSpy.mockReturnValueOnce(false);
+
+    PrivacyGuard.interceptFetch();
+
+    const context = { custom: "context" };
+    const args = ["https://example.com/api", { method: "POST" }];
+    const result = await globalThis.fetch.call(context, ...args);
+
+    expect(result).toEqual(expect.objectContaining({ status: 200, statusText: "OK" }));
+    expect(mockOriginalFetch).toHaveBeenCalledWith(...args);
+    expect(mockOriginalFetch.mock.contexts[0]).toBe(context);
+    expect(eventLogSpy).not.toHaveBeenCalled();
   });
 });
