@@ -1,6 +1,353 @@
+import { EventLog } from "../event-log.js";
 import { URLCleaner } from "./cleaner.js";
 
-let shouldBlockImpl = () => false;
+let shouldBlockImpl = null;
+let imageConstructorPatched = false;
+let imageSrcSetterPatched = false;
+let imageSrcsetSetterPatched = false;
+
+/**
+ * Replaces the current history entry with a cleaned version of location.href.
+ * Runs at module evaluation time to capture tracking parameters before third parties do.
+ * @returns {void}
+ */
+function cleanInitialLocation() {
+  if (typeof location === "undefined" || typeof history === "undefined") {
+    return;
+  }
+  const protocol = location.protocol;
+  if (protocol !== "http:" && protocol !== "https:") {
+    return;
+  }
+  try {
+    const originalHref = location.href;
+    const cleanedHref = URLCleaner.cleanHref(originalHref);
+    if (cleanedHref && cleanedHref !== originalHref && typeof history.replaceState === "function") {
+      history.replaceState(history.state, document.title, cleanedHref);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+cleanInitialLocation();
+
+/**
+ * Determines whether the current shouldBlock predicate blocks the provided URL.
+ * @param {string} url - URL to evaluate.
+ * @returns {boolean} - True when the predicate blocks the URL.
+ */
+function isBlockedUrl(url) {
+  if (typeof shouldBlockImpl !== "function") {
+    return false;
+  }
+  try {
+    return shouldBlockImpl(url);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Applies hardened defaults to newly created image instances.
+ * @param {HTMLImageElement | null | undefined} img - Image instance to harden.
+ * @returns {HTMLImageElement | null | undefined} - The same image instance.
+ */
+function primeImageInstance(img) {
+  if (!img) {
+    return img;
+  }
+  try {
+    if (!img.referrerPolicy) {
+      img.referrerPolicy = "no-referrer";
+    }
+  } catch {
+    /* ignore */
+  }
+  return img;
+}
+
+/**
+ * Retrieves the global HTML image prototype when available.
+ * @returns {HTMLImageElement["prototype"] | null} - Prototype or null when unsupported.
+ */
+function getImagePrototype() {
+  if (typeof HTMLImageElement === "undefined" || !HTMLImageElement) {
+    return null;
+  }
+  return HTMLImageElement.prototype;
+}
+
+/**
+ * Normalizes an image URL and determines whether it should be blocked.
+ * @param {string} raw - Original src value provided by the page.
+ * @param {Element | null | undefined} element - The image element receiving the URL.
+ * @returns {string | null} - Cleaned URL when allowed, or null when the URL is blocked.
+ */
+function sanitizeImageUrl(raw, element) {
+  let cleanedValue;
+  try {
+    cleanedValue = URLCleaner.cleanHref(raw, element?.baseURI);
+  } catch {
+    cleanedValue = raw;
+  }
+  if (!isBlockedUrl(cleanedValue)) {
+    return cleanedValue;
+  }
+  try {
+    EventLog.push({ kind: "image", reason: "block", url: cleanedValue });
+  } catch {
+    /* ignore */
+  }
+  try {
+    console.debug("[Privacy Guard] Blocked image beacon:", cleanedValue);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Wraps the global Image constructor so new pixels inherit hardened defaults.
+ * @returns {void}
+ */
+function patchImageConstructor() {
+  if (imageConstructorPatched) {
+    return;
+  }
+  imageConstructorPatched = true;
+  try {
+    const ImageCtor = Reflect.get(globalThis, "Image");
+    if (typeof ImageCtor !== "function" || ImageCtor.__PG_isPatched) {
+      return;
+    }
+    const WrappedImage = function Image(...args) {
+      const instance = Reflect.construct(ImageCtor, args, new.target || WrappedImage);
+      return primeImageInstance(instance);
+    };
+    Object.setPrototypeOf(WrappedImage, ImageCtor);
+    WrappedImage.prototype = ImageCtor.prototype;
+    Object.defineProperty(WrappedImage, "__PG_original", { value: ImageCtor });
+    Object.defineProperty(WrappedImage, "__PG_isPatched", { value: true });
+    Reflect.set(globalThis, "Image", WrappedImage);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Wraps `HTMLImageElement#src` to sanitize and optionally block beacons.
+ * @param {HTMLImageElement["prototype"]} imagePrototype - Image prototype to patch.
+ * @returns {void}
+ */
+function patchImageSrc(imagePrototype) {
+  if (imageSrcSetterPatched) {
+    return;
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(imagePrototype, "src");
+  if (!descriptor || typeof descriptor.set !== "function") {
+    imageSrcSetterPatched = true;
+    return;
+  }
+  const originalSet = descriptor.set;
+  const originalGet = descriptor.get;
+  const sanitizedSetter = function setSanitizedSrc(value) {
+    if (value == null) {
+      return Reflect.apply(originalSet, this, [value]);
+    }
+    const raw = typeof value === "string" ? value : String(value);
+    const cleaned = sanitizeImageUrl(raw, this);
+    if (cleaned === null) {
+      try {
+        this.removeAttribute("src");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    return Reflect.apply(originalSet, this, [cleaned]);
+  };
+  Object.defineProperty(imagePrototype, "src", {
+    configurable: true,
+    enumerable: descriptor.enumerable ?? false,
+    get: originalGet,
+    set: sanitizedSetter,
+  });
+  imageSrcSetterPatched = true;
+}
+
+/**
+ * Wraps `HTMLImageElement#srcset` to normalize every URL inside srcset lists.
+ * @param {HTMLImageElement["prototype"]} imagePrototype - Image prototype to patch.
+ * @param {(value: string) => string} cleanSrcset - Cleaner function for srcset strings.
+ * @returns {void}
+ */
+function patchImageSrcset(imagePrototype, cleanSrcset) {
+  if (imageSrcsetSetterPatched) {
+    return;
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(imagePrototype, "srcset");
+  if (!descriptor || typeof descriptor.set !== "function") {
+    imageSrcsetSetterPatched = true;
+    return;
+  }
+  const originalSet = descriptor.set;
+  const originalGet = descriptor.get;
+  const sanitizedSetter = function setSanitizedSrcset(value) {
+    if (typeof value !== "string") {
+      return Reflect.apply(originalSet, this, [value]);
+    }
+    const cleanedValue = cleanSrcset(value);
+    return Reflect.apply(originalSet, this, [cleanedValue]);
+  };
+  Object.defineProperty(imagePrototype, "srcset", {
+    configurable: true,
+    enumerable: descriptor.enumerable ?? false,
+    get: originalGet,
+    set: sanitizedSetter,
+  });
+  imageSrcsetSetterPatched = true;
+}
+
+/**
+ * Creates a snapshot of an element's mutable attributes prior to rewriting URLs.
+ * @param {Element} el - Element to snapshot.
+ * @returns {{ className: string, dataAttributes: [string, string][] }} Snapshot payload.
+ */
+function snapshotElementState(el) {
+  const dataAttributes = [];
+  for (const attribute of el.attributes) {
+    if (attribute.name.startsWith("data-") && attribute.name !== "data-privacy-guard-cleaned") {
+      dataAttributes.push([attribute.name, attribute.value]);
+    }
+  }
+  return { className: el.className, dataAttributes };
+}
+
+/**
+ * Restores previously captured element attributes after rewriting.
+ * @param {Element} el - Element to restore.
+ * @param {{ className: string, dataAttributes: [string, string][] }} snapshot - Snapshot data.
+ * @returns {void}
+ */
+function restoreElementState(el, snapshot) {
+  if (!snapshot) {
+    return;
+  }
+  const { className, dataAttributes } = snapshot;
+  if (className && el.className !== className) {
+    el.className = className;
+  }
+  for (const [name, value] of dataAttributes) {
+    if (el.getAttribute(name) !== value) {
+      el.setAttribute(name, value);
+    }
+  }
+}
+
+const SWEEP_SELECTOR = "a[href], img[src], img[srcset], form[action], link[rel][href]";
+const OBSERVED_ATTRIBUTE_NAMES = ["href", "src", "srcset", "action", "rel", "ping"];
+const OBSERVED_ATTRIBUTES = new Set(OBSERVED_ATTRIBUTE_NAMES);
+
+/**
+ * Normalizes the URL argument used for History API wrappers.
+ * @param {unknown} url - Proposed URL argument.
+ * @returns {unknown} - Cleaned URL when possible, or the original value.
+ */
+function sanitizeHistoryArgument(url) {
+  if (typeof url !== "string") {
+    return url;
+  }
+  try {
+    return URLCleaner.cleanHref(url);
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Wraps `history.pushState` to clean URL arguments.
+ * @returns {void}
+ */
+function ensurePatchedPushState() {
+  const original = history.pushState;
+  if (typeof original !== "function" || original.__PG_wrapped) {
+    return;
+  }
+  const wrapped = function pushState(state, title, url) {
+    const sanitizedUrl = sanitizeHistoryArgument(url);
+    return Reflect.apply(original, this, [state, title, sanitizedUrl]);
+  };
+  Object.defineProperty(wrapped, "__PG_wrapped", { value: true });
+  Object.defineProperty(wrapped, "__PG_original", { value: original });
+  history.pushState = wrapped;
+}
+
+/**
+ * Wraps `history.replaceState` to clean URL arguments.
+ * @returns {void}
+ */
+function ensurePatchedReplaceState() {
+  const original = history.replaceState;
+  if (typeof original !== "function" || original.__PG_wrapped) {
+    return;
+  }
+  const wrapped = function replaceState(state, title, url) {
+    const sanitizedUrl = sanitizeHistoryArgument(url);
+    return Reflect.apply(original, this, [state, title, sanitizedUrl]);
+  };
+  Object.defineProperty(wrapped, "__PG_wrapped", { value: true });
+  Object.defineProperty(wrapped, "__PG_original", { value: original });
+  history.replaceState = wrapped;
+}
+
+/**
+ * Processes an element discovered during DOM sweeps based on its tag name.
+ * @param {typeof URLCleaningRuntime} runtime - Runtime instance.
+ * @param {Element} el - Element to normalize.
+ * @returns {void}
+ */
+function processSweepTarget(runtime, el) {
+  const tagName = el.tagName;
+  switch (tagName) {
+    case "A": {
+      runtime.rewriteElAttr(el, "href");
+      runtime.hardenAnchor(el);
+      break;
+    }
+    case "IMG": {
+      runtime.rewriteElAttr(el, "src");
+      if (el.hasAttribute("srcset")) {
+        const before = el.getAttribute("srcset") || "";
+        const after = runtime.cleanSrcset(before);
+        if (after !== before) {
+          el.setAttribute("srcset", after);
+        }
+      }
+      break;
+    }
+    case "FORM": {
+      runtime.rewriteElAttr(el, "action");
+      break;
+    }
+    case "LINK": {
+      runtime.maybeNeutralizeLinkEl(el);
+      break;
+    }
+    default: {
+      break;
+    }
+  }
+}
+
+/**
+ * Returns true when the provided node is an Element.
+ * @param {Node} node - Candidate node.
+ * @returns {node is Element} - Whether the node is an Element.
+ */
+function isElementNode(node) {
+  return Boolean(node && node.nodeType === Node.ELEMENT_NODE);
+}
 
 /**
  * Sets the predicate used to determine if a URL should be blocked.
@@ -12,7 +359,7 @@ export function setShouldBlock(fn) {
     shouldBlockImpl = fn;
     return;
   }
-  shouldBlockImpl = () => false;
+  shouldBlockImpl = null;
 }
 
 export const URLCleaningRuntime = {
@@ -56,7 +403,7 @@ export const URLCleaningRuntime = {
       // Add noopener and noreferrer to prevent leaking referrer and window.opener
       parts.add("noopener");
       parts.add("noreferrer");
-      a.setAttribute("rel", Array.from(parts).join(" "));
+      a.setAttribute("rel", [...parts].join(" "));
     } catch {
       /* ignore */
     }
@@ -83,7 +430,7 @@ export const URLCleaningRuntime = {
         return;
       }
       // if it points to a blocked domain, remove it
-      if (shouldBlockImpl(href)) {
+      if (isBlockedUrl(href)) {
         linkEl.remove();
         return;
       }
@@ -92,6 +439,12 @@ export const URLCleaningRuntime = {
       if (cleaned !== href) {
         linkEl.setAttribute("href", cleaned);
       }
+      // mark element as processed to avoid repeated work
+      try {
+        linkEl.dataset.privacyGuardCleaned = "1";
+      } catch {
+        /* ignore */
+      }
     } catch {
       /* ignore */
     }
@@ -99,52 +452,30 @@ export const URLCleaningRuntime = {
 
   // Rewrite a single element in-place if attribute exists
   rewriteElAttr(el, attr) {
-    const val = el.getAttribute(attr);
-    if (!val) {
+    if (!el) {
+      return;
+    }
+    const current = el.getAttribute(attr);
+    if (!current || el.dataset.privacyGuardCleaned === "1") {
       return;
     }
 
-    // Skip if already processed to avoid redundant operations
-    if (el.dataset.privacyGuardCleaned === "1") {
+    let cleaned;
+    try {
+      cleaned = URLCleaner.cleanHref(current, el.baseURI);
+    } catch {
+      cleaned = current;
+    }
+
+    if (!cleaned || cleaned === current) {
+      el.dataset.privacyGuardCleaned = "1";
       return;
     }
 
-    const cleaned = URLCleaner.cleanHref(val, el.baseURI);
-
-    // Only modify if there's an actual change
-    if (cleaned && cleaned !== val) {
-      // Additional safety: preserve existing data attributes and classes
-      const existingDataAttrs = {};
-      const existingClasses = el.className;
-
-      // Capture existing data-* attributes before modification
-      for (const dataAttr of el.attributes) {
-        if (dataAttr.name.startsWith("data-") && dataAttr.name !== "data-privacy-guard-cleaned") {
-          existingDataAttrs[dataAttr.name] = dataAttr.value;
-        }
-      }
-
-      // Apply the cleaned URL
-      el.setAttribute(attr, cleaned);
-
-      // Restore any data attributes that might have been affected
-      Object.entries(existingDataAttrs).forEach(([name, value]) => {
-        if (el.getAttribute(name) !== value) {
-          el.setAttribute(name, value);
-        }
-      });
-
-      // Restore classes if they were modified
-      if (el.className !== existingClasses && existingClasses) {
-        el.className = existingClasses;
-      }
-
-      // Mark as processed
-      el.dataset.privacyGuardCleaned = "1";
-    } else if (cleaned === val) {
-      // Even if no change, mark as processed to avoid future checks
-      el.dataset.privacyGuardCleaned = "1";
-    }
+    const snapshot = snapshotElementState(el);
+    el.setAttribute(attr, cleaned);
+    restoreElementState(el, snapshot);
+    el.dataset.privacyGuardCleaned = "1";
   },
 
   // Initial and incremental sweeps
@@ -153,30 +484,12 @@ export const URLCleaningRuntime = {
       return;
     }
     // Only scan relevant elements
-    root
-      .querySelectorAll("a[href], img[src], img[srcset], form[action], link[rel][href]")
-      .forEach((el) => {
-        if (el.dataset.privacyGuardCleaned === "1") {
-          return;
-        }
-        if (el.tagName === "A") {
-          this.rewriteElAttr(el, "href");
-          this.hardenAnchor(el);
-        } else if (el.tagName === "IMG") {
-          this.rewriteElAttr(el, "src");
-          if (el.hasAttribute("srcset")) {
-            const before = el.getAttribute("srcset") || "";
-            const after = this.cleanSrcset(before);
-            if (after !== before) {
-              el.setAttribute("srcset", after);
-            }
-          }
-        } else if (el.tagName === "FORM") {
-          this.rewriteElAttr(el, "action");
-        } else if (el.tagName === "LINK") {
-          this.maybeNeutralizeLinkEl(el);
-        }
-      });
+    for (const el of root.querySelectorAll(SWEEP_SELECTOR)) {
+      if (el.dataset.privacyGuardCleaned === "1") {
+        continue;
+      }
+      processSweepTarget(this, el);
+    }
   },
 
   // Intercept clicks to ensure last-moment cleaning (covers dynamic href)
@@ -224,60 +537,44 @@ export const URLCleaningRuntime = {
 
   // Patch history API to clean pushState/replaceState URLs (SPA)
   interceptHistory() {
-    const patch = (m) => {
-      const original = history[m];
-      history[m] = function (state, title, url) {
-        if (typeof url === "string") {
-          url = URLCleaner.cleanHref(url);
-        }
-        return original.apply(this, [state, title, url]);
-      };
-    };
-    patch("pushState");
-    patch("replaceState");
+    ensurePatchedPushState();
+    ensurePatchedReplaceState();
 
     // Also react to popstate-driven navigations by sweeping DOM
-    window.addEventListener("popstate", () => {
+    globalThis.addEventListener("popstate", () => {
       this.sweep(document);
     });
   },
 
   // Observe added nodes; filter to relevant elements for performance
   observeMutations() {
-    const obs = new MutationObserver((muts) => {
-      for (const m of muts) {
-        m.addedNodes.forEach((n) => {
-          if (n && n.nodeType === Node.ELEMENT_NODE) {
-            // Clean the node itself if it is relevant
-            if (
-              n.matches &&
-              n.matches("a[href],img[src],img[srcset],form[action],link[rel][href]")
-            ) {
-              this.sweep(n);
-            } else {
-              // Or scan its children (bounded)
-              this.sweep(n);
-            }
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (isElementNode(node)) {
+            this.sweep(node);
           }
-        });
-        if (m.type === "attributes" && m.target && m.target.nodeType === Node.ELEMENT_NODE) {
-          const t = m.target;
-          const ATTRS = new Set(["href", "src", "srcset", "action", "rel", "ping"]);
-          if (ATTRS.has(m.attributeName)) {
-            try {
-              delete t.dataset.privacyGuardCleaned;
-            } catch {}
-            this.sweep(t);
+        }
+        if (
+          record.type === "attributes" &&
+          isElementNode(record.target) &&
+          OBSERVED_ATTRIBUTES.has(record.attributeName)
+        ) {
+          try {
+            delete record.target.dataset.privacyGuardCleaned;
+          } catch {
+            /* noop: dataset entry may be read-only */
           }
+          this.sweep(record.target);
         }
       }
     });
 
-    obs.observe(document.documentElement || document, {
+    observer.observe(document.documentElement || document, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["href", "src", "srcset", "action", "rel", "ping"],
+      attributeFilter: OBSERVED_ATTRIBUTE_NAMES,
     });
   },
 
@@ -286,16 +583,17 @@ export const URLCleaningRuntime = {
     try {
       // window.open
       const _open = window.open;
-      if (_open) {
-        window.open = function (url, name, specs) {
-          try {
-            if (typeof url === "string") {
-              url = URLCleaner.cleanHref(url);
+      if (typeof _open === "function") {
+        window.open = function openWrapped(url, name, specs) {
+          let sanitized = url;
+          if (typeof sanitized === "string") {
+            try {
+              sanitized = URLCleaner.cleanHref(sanitized);
+            } catch {
+              sanitized = url;
             }
-          } catch {
-            /* ignore */
           }
-          return _open.call(window, url, name, specs);
+          return Reflect.apply(_open, globalThis, [sanitized, name, specs]);
         };
       }
     } catch {
@@ -306,33 +604,45 @@ export const URLCleaningRuntime = {
       const locationPrototype = Object.getPrototypeOf(location);
       if (locationPrototype && locationPrototype.assign) {
         const _assign = locationPrototype.assign;
-        locationPrototype.assign = function (url) {
-          try {
-            if (typeof url === "string") {
-              url = URLCleaner.cleanHref(url);
+        locationPrototype.assign = function assignWrapped(url) {
+          let sanitized = url;
+          if (typeof sanitized === "string") {
+            try {
+              sanitized = URLCleaner.cleanHref(sanitized);
+            } catch {
+              sanitized = url;
             }
-          } catch {
-            /* ignore */
           }
-          return _assign.call(this, url);
+          return Reflect.apply(_assign, this, [sanitized]);
         };
       }
       if (locationPrototype && locationPrototype.replace) {
         const _replace = locationPrototype.replace;
-        locationPrototype.replace = function (url) {
-          try {
-            if (typeof url === "string") {
-              url = URLCleaner.cleanHref(url);
+        locationPrototype.replace = function replaceWrapped(url) {
+          let sanitized = url;
+          if (typeof sanitized === "string") {
+            try {
+              sanitized = URLCleaner.cleanHref(sanitized);
+            } catch {
+              sanitized = url;
             }
-          } catch {
-            /* ignore */
           }
-          return _replace.call(this, url);
+          return Reflect.apply(_replace, this, [sanitized]);
         };
       }
     } catch {
       /* ignore */
     }
+  },
+
+  interceptImages() {
+    patchImageConstructor();
+    const imagePrototype = getImagePrototype();
+    if (!imagePrototype) {
+      return;
+    }
+    patchImageSrc(imagePrototype);
+    patchImageSrcset(imagePrototype, (value) => this.cleanSrcset(value));
   },
 
   init() {
@@ -348,6 +658,7 @@ export const URLCleaningRuntime = {
     this.interceptHistory();
     this.observeMutations();
     this.interceptNavigation();
+    this.interceptImages();
     // Final pass on full load (late-injected links)
     window.addEventListener("load", () => this.sweep(document));
   },
@@ -358,7 +669,7 @@ export const URLCleaningRuntime = {
   try {
     const host = location.hostname;
     const isYouTubeHost =
-      /(^|\.)youtube\.com$/i.test(host) || /(^|\.)youtube-nocookie\.com$/i.test(host);
+      /(?:^|\.)youtube\.com$/i.test(host) || /(?:^|\.)youtube-nocookie\.com$/i.test(host);
     if (!isYouTubeHost) {
       return;
     }
@@ -387,34 +698,49 @@ export const URLCleaningRuntime = {
     }
 
     /**
-     * Wraps a History API method to clean URL arguments before invocation.
-     * @param {string} name - History method name to wrap (for example, "pushState").
+     * Wraps a History API method for YouTube SPA canonicalization.
+     * @param {() => typeof history.pushState} getOriginal - Getter for the current method.
+     * @param {(wrapped: typeof history.pushState) => void} assignWrapped - Setter to install the wrapped method.
      * @returns {void}
      */
-    function wrapHistory(name) {
-      const original = history[name];
-      if (typeof original !== "function") {
+    function wrapHistoryMethodForYouTube(getOriginal, assignWrapped) {
+      const original = getOriginal();
+      if (typeof original !== "function" || original.__PG_wrapped) {
         return;
       }
-      history[name] = function (state, title, url) {
-        if (typeof url === "string") {
+      const wrapped = function youtubeHistoryWrapper(state, title, url) {
+        let sanitized = url;
+        if (typeof sanitized === "string") {
           try {
-            const cleaned = URLCleaner.cleanHref(url, location.href);
-            return original.call(this, state, title, cleaned);
+            sanitized = URLCleaner.cleanHref(sanitized, location.href);
           } catch {
-            /* ignore */
+            sanitized = url;
           }
         }
-        return original.apply(this, [state, title, url]);
+        return Reflect.apply(original, this, [state, title, sanitized]);
       };
+      Object.defineProperty(wrapped, "__PG_wrapped", { value: true });
+      Object.defineProperty(wrapped, "__PG_original", { value: original });
+      assignWrapped(wrapped);
     }
 
-    wrapHistory("pushState");
-    wrapHistory("replaceState");
+    wrapHistoryMethodForYouTube(
+      () => history.pushState,
+      (wrapped) => {
+        history.pushState = wrapped;
+      },
+    );
+
+    wrapHistoryMethodForYouTube(
+      () => history.replaceState,
+      (wrapped) => {
+        history.replaceState = wrapped;
+      },
+    );
 
     const events = ["yt-navigate-finish", "yt-page-data-updated", "popstate", "hashchange"];
     for (const eventName of events) {
-      window.addEventListener(eventName, cleanLocationHref);
+      globalThis.addEventListener(eventName, cleanLocationHref);
     }
 
     if (document.readyState === "complete" || document.readyState === "interactive") {
