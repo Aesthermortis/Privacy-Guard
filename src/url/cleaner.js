@@ -1,5 +1,7 @@
 import { FEATURES } from "../config.js";
 
+const JAVASCRIPT_PROTOCOL = "javascript" + ":";
+
 export const URLCleaner = {
   // Global param blacklist (lowercased compare)
   GLOBAL_STRIP: new Set([
@@ -72,9 +74,191 @@ export const URLCleaner = {
       : []),
   ],
 
+  isYouTubeRedirectPath(u) {
+    return u.pathname === "/redirect";
+  },
+
+  extractYouTubeTimeFromHash(hash) {
+    if (!hash) {
+      return "";
+    }
+    const match = hash.match(/(?:^|[#&])t=([^&]+)/);
+    return match ? match[1] : "";
+  },
+
+  collectYouTubePlaybackContext(u) {
+    return {
+      canonicalTime: u.searchParams.get("t") || this.extractYouTubeTimeFromHash(u.hash),
+      startParam: u.searchParams.get("start"),
+      playlistId: u.searchParams.get("list"),
+      playlistIndex: u.searchParams.get("index"),
+    };
+  },
+
+  applyYouTubePlaybackParams(u, context = {}) {
+    const { canonicalTime, startParam, playlistId, playlistIndex } = context;
+    if (playlistId) {
+      u.searchParams.set("list", playlistId);
+    }
+    if (playlistIndex) {
+      u.searchParams.set("index", playlistIndex);
+    }
+    if (canonicalTime) {
+      u.searchParams.set("t", canonicalTime);
+    } else if (startParam) {
+      u.searchParams.set("start", startParam);
+    }
+  },
+
+  transformToYouTubeWatch(u, videoId, context = {}) {
+    if (!videoId) {
+      return;
+    }
+
+    u.hostname = "www.youtube.com";
+    u.pathname = "/watch";
+    u.search = "";
+    u.searchParams.set("v", videoId);
+    this.applyYouTubePlaybackParams(u, context);
+    u.hash = "";
+  },
+
+  normalizeYouTubeSpecialPaths(u) {
+    if (u.pathname === "/watch") {
+      return false;
+    }
+
+    const embedOrShortsMatch = u.pathname.match(/^\/(shorts|embed)\/([^/?#]+)/);
+    if (!embedOrShortsMatch) {
+      return false;
+    }
+
+    const [, section, resourceId] = embedOrShortsMatch;
+    const isEmbed = section === "embed";
+
+    if (isEmbed) {
+      u.hostname = "www.youtube.com";
+    }
+
+    if (isEmbed && resourceId === "videoseries") {
+      const playlistId = u.searchParams.get("list");
+      if (playlistId) {
+        u.pathname = "/playlist";
+        u.search = "";
+        u.searchParams.set("list", playlistId);
+        u.hash = "";
+      }
+      return true;
+    }
+
+    if (!resourceId) {
+      return false;
+    }
+
+    const context = this.collectYouTubePlaybackContext(u);
+    this.transformToYouTubeWatch(u, resourceId, context);
+    return true;
+  },
+
+  extractShortVideoId(u) {
+    const segments = u.pathname.split("/").filter(Boolean);
+    if (segments.length === 0) {
+      return "";
+    }
+    if (segments[0] === "shorts" && segments[1]) {
+      return segments[1];
+    }
+    return segments[0];
+  },
+
+  isLikelyYouTubeId(id) {
+    return typeof id === "string" && id.length > 5;
+  },
+
+  sanitizeYouTubeWatch(u) {
+    const allowedParams = new Set(["v", "t", "start", "list", "index"]);
+    this.stripParams(u, allowedParams, false);
+
+    const shareParams = ["si", "pp", "feature", "ab_channel", "start_radio"];
+    for (const paramName of shareParams) {
+      u.searchParams.delete(paramName);
+    }
+
+    u.hostname = "www.youtube.com";
+  },
+
+  isParamAllowed(key, keyLC, allowlist, preserveCase) {
+    const list = allowlist ?? new Set();
+    return preserveCase ? list.has(key) : list.has(keyLC);
+  },
+
+  isAmazonNoiseKey(keyLC, value) {
+    if (value === "") {
+      return true;
+    }
+
+    return (
+      keyLC === "ref" ||
+      keyLC === "ref_src" ||
+      keyLC === "ref_url" ||
+      keyLC.startsWith("ref_") ||
+      keyLC === "_encoding" ||
+      keyLC.startsWith("pf_rd_") ||
+      keyLC.startsWith("pd_rd_") ||
+      keyLC === "content-id"
+    );
+  },
+
+  shouldStripParam(key, value, allowlist, preserveCase) {
+    const keyLC = key.toLowerCase();
+    if (this.isParamAllowed(key, keyLC, allowlist, preserveCase)) {
+      return false;
+    }
+
+    if (this.GLOBAL_STRIP.has(keyLC) || keyLC.startsWith("utm_")) {
+      return true;
+    }
+
+    return this.isAmazonNoiseKey(keyLC, value);
+  },
+
+  matchesRedirectRule(rule, host, path) {
+    return host.includes(rule.hostIncludes) && (!rule.pathHas || path.includes(rule.pathHas));
+  },
+
+  parseRedirectTarget(value) {
+    if (!value) {
+      return null;
+    }
+    try {
+      return new URL(value);
+    } catch {
+      try {
+        return new URL(decodeURIComponent(value));
+      } catch {
+        return null;
+      }
+    }
+  },
+
+  extractRedirectTarget(u, rule) {
+    for (const name of rule.param) {
+      const candidate = this.parseRedirectTarget(u.searchParams.get(name));
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return null;
+  },
+
   // Domain-specific rules (lower priority than redirect resolution)
   byDomain(u) {
     const host = u.hostname.toLowerCase();
+
+    if (this.isAppsFlyerHost(host)) {
+      this.cleanAppsflyer(u);
+      return;
+    }
 
     // AMAZON: canonicalize to /dp/ASIN and strip noisy params.
     if (
@@ -121,7 +305,40 @@ export const URLCleaner = {
         host.endsWith(".ebay.es"))
     ) {
       this.cleanEbay(u);
-      return;
+    }
+  },
+
+  isAppsFlyerHost(host) {
+    if (!host) {
+      return false;
+    }
+    return (
+      host === "appsflyer.com" ||
+      host.endsWith(".appsflyer.com") ||
+      host === "onelink.me" ||
+      host.endsWith(".onelink.me")
+    );
+  },
+
+  cleanAppsflyer(u) {
+    const toDelete = [];
+    for (const key of u.searchParams.keys()) {
+      const lower = key.toLowerCase();
+      if (
+        lower === "pid" ||
+        lower === "c" ||
+        lower === "deep_link_value" ||
+        lower.startsWith("af_") ||
+        /^af_sub[1-5]$/i.test(lower)
+      ) {
+        toDelete.push(key);
+      }
+    }
+    for (const key of toDelete) {
+      u.searchParams.delete(key);
+    }
+    if ([...u.searchParams.keys()].length === 0) {
+      u.search = "";
     }
   },
 
@@ -167,7 +384,7 @@ export const URLCleaner = {
       "i", // department
       "node", // node
     ]);
-    this.stripParams(u, allowed, /* preserveCase*/ false);
+    this.stripParams(u, allowed, /* preserveCase */ false);
   },
 
   /**
@@ -176,124 +393,28 @@ export const URLCleaner = {
    * @returns {void}
    */
   cleanYouTube(u) {
-    if (u.pathname === "/redirect") {
-      // Will be handled by resolveRedirector
+    if (this.isYouTubeRedirectPath(u)) {
       return;
     }
 
-    // Convert /shorts/:id and /embed/:id → /watch
-    // Special: /embed/videoseries?list=... → /playlist?list=...
-    const embedOrShortsMatch = u.pathname.match(/^\/(shorts|embed)\/([^/?#]+)/);
-    if (u.pathname !== "/watch" && embedOrShortsMatch) {
-      const section = embedOrShortsMatch[1]; // "shorts" | "embed"
-      const resourceId = embedOrShortsMatch[2]; // video id or "videoseries"
-      const isEmbed = section === "embed";
-
-      // Normalize host for embed (also handles youtube-nocookie)
-      if (isEmbed) {
-        u.hostname = "www.youtube.com";
-      }
-
-      // Playlist embeds go to /playlist
-      if (isEmbed && resourceId === "videoseries") {
-        const playlistId = u.searchParams.get("list");
-        if (playlistId) {
-          u.pathname = "/playlist";
-          u.search = "";
-          u.searchParams.set("list", playlistId);
-          u.hash = "";
-        }
-        return;
-      }
-
-      // shorts/embed with a concrete video id → /watch
-      if (resourceId) {
-        const tFromQuery = u.searchParams.get("t");
-        const tFromHash = u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "";
-        const canonicalTimeT = tFromQuery || tFromHash;
-        const startParam = u.searchParams.get("start");
-        const playlistId = u.searchParams.get("list");
-        const playlistIndex = u.searchParams.get("index");
-
-        u.pathname = "/watch";
-        u.search = "";
-        u.searchParams.set("v", resourceId);
-        if (playlistId) {
-          u.searchParams.set("list", playlistId);
-        }
-        if (playlistIndex) {
-          u.searchParams.set("index", playlistIndex);
-        }
-        // Prefer `t`; only use `start` when `t` is absent
-        if (canonicalTimeT) {
-          u.searchParams.set("t", canonicalTimeT);
-        } else if (startParam) {
-          u.searchParams.set("start", startParam);
-        }
-        u.hash = "";
-      }
+    if (this.normalizeYouTubeSpecialPaths(u)) {
+      return;
     }
 
     if (u.pathname === "/watch") {
-      const allowedParams = new Set(["v", "t", "start", "list", "index"]);
-      this.stripParams(u, allowedParams, false);
-
-      const shareParams = ["si", "pp", "feature", "ab_channel", "start_radio"];
-      for (const paramName of shareParams) {
-        u.searchParams.delete(paramName);
-      }
-
-      // Normalize host
-      u.hostname = "www.youtube.com";
+      this.sanitizeYouTubeWatch(u);
     }
   },
 
-  /**
-   * Clean YouTube Shorts URLs by removing unnecessary parameters and canonicalizing the path.
-   * @param {URL} u URL instance representing the current request to normalize.
-   * @returns {void}
-   */
   cleanYouTubeShort(u) {
-    // youtu.be/<id> → https://www.youtube.com/watch?v=<id>[&t|&start][&list][&index]
-    const segments = u.pathname.split("/").filter(Boolean);
-    if (segments.length === 0) {
+    const videoId = this.extractShortVideoId(u);
+    if (!this.isLikelyYouTubeId(videoId)) {
       return;
     }
 
-    const isShortsForm = segments[0] === "shorts" && segments[1];
-    const videoId = isShortsForm ? segments[1] : segments[0];
-
-    if (videoId && videoId.length > 5) {
-      const tFromQuery = u.searchParams.get("t");
-      const tFromHash = u.hash.match(/(?:^|[#&])t=([^&]+)/)?.[1] ?? "";
-      const canonicalTimeT = tFromQuery || tFromHash;
-      const startParam = u.searchParams.get("start");
-      const playlistId = u.searchParams.get("list");
-      const playlistIndex = u.searchParams.get("index");
-
-      u.hostname = "www.youtube.com";
-      u.pathname = "/watch";
-      u.search = "";
-      u.searchParams.set("v", videoId);
-
-      if (playlistId) {
-        u.searchParams.set("list", playlistId);
-      }
-      if (playlistIndex) {
-        u.searchParams.set("index", playlistIndex);
-      }
-
-      // Prefer `t`; only use `start` when `t` is absent
-      if (canonicalTimeT) {
-        u.searchParams.set("t", canonicalTimeT);
-      } else if (startParam) {
-        u.searchParams.set("start", startParam);
-      }
-
-      u.hash = "";
-    }
+    const context = this.collectYouTubePlaybackContext(u);
+    this.transformToYouTubeWatch(u, videoId, context);
   },
-
   cleanEbay(u) {
     // Keep intent: item id, query terms; drop marketing noise (mkcid, mkevt, campid, customid, etc.)
     const allow = new Set([
@@ -322,36 +443,17 @@ export const URLCleaner = {
     const params = u.searchParams;
     // Build list to delete to avoid mutating while iterating
     const toDelete = [];
-    for (const [k, v] of params.entries()) {
-      const keyLC = k.toLowerCase();
-      const inAllow = preserveCase ? allowlist.has(k) : allowlist.has(keyLC);
-      if (!inAllow && (this.GLOBAL_STRIP.has(keyLC) || keyLC.startsWith("utm_"))) {
-        toDelete.push(k);
-        continue;
-      }
-      // Amazon-specific noisy params to remove unless explicitly allowed
-      if (
-        !inAllow &&
-        (v === "" ||
-          keyLC === "ref" ||
-          keyLC === "ref_src" ||
-          keyLC === "ref_url" ||
-          keyLC.startsWith("ref_") ||
-          keyLC === "_encoding" ||
-          keyLC.startsWith("pf_rd_") ||
-          keyLC.startsWith("pd_rd_") ||
-          keyLC === "content-id")
-      ) {
-        toDelete.push(k);
-        continue;
+    for (const [key, value] of params.entries()) {
+      if (this.shouldStripParam(key, value, allowlist, preserveCase)) {
+        toDelete.push(key);
       }
     }
-    for (const k of toDelete) {
-      params.delete(k);
+    for (const key of toDelete) {
+      params.delete(key);
     }
     // Remove Amazon-only "/ref=" path segments
-    if (/(^|\.)amazon\./i.test(u.hostname)) {
-      u.pathname = u.pathname.replace(/\/ref=[^/]+/gi, "");
+    if (/(?:^|\.)amazon\./i.test(u.hostname)) {
+      u.pathname = u.pathname.replaceAll(/\/ref=[^/]+/gi, "");
     }
     // Drop dangling '?' if nothing remains
     if ([...u.searchParams.keys()].length === 0) {
@@ -363,23 +465,14 @@ export const URLCleaner = {
   resolveRedirector(u) {
     const host = u.hostname.toLowerCase();
     const path = u.pathname;
-    for (const r of this.REDIRECTORS) {
-      if (host.includes(r.hostIncludes) && (!r.pathHas || path.includes(r.pathHas))) {
-        for (const name of r.param) {
-          const target = u.searchParams.get(name);
-          if (target) {
-            try {
-              return new URL(target);
-            } catch {
-              // sometimes the value is encoded twice
-              try {
-                return new URL(decodeURIComponent(target));
-              } catch {
-                /* ignore */
-              }
-            }
-          }
-        }
+    for (const rule of this.REDIRECTORS) {
+      if (!this.matchesRedirectRule(rule, host, path)) {
+        continue;
+      }
+
+      const target = this.extractRedirectTarget(u, rule);
+      if (target) {
+        return target;
       }
     }
     return null;
@@ -395,7 +488,7 @@ export const URLCleaner = {
       u.port = "";
     }
     // collapse multiple slashes except after protocol
-    u.pathname = u.pathname.replace(/\/{2,}/g, "/");
+    u.pathname = u.pathname.replaceAll(/\/{2,}/g, "/");
     // strip empty query
     if ([...u.searchParams.keys()].length === 0) {
       u.search = "";
@@ -420,11 +513,14 @@ export const URLCleaner = {
     } catch {
       /* ignore */
     }
-    return undefined;
   },
 
   // Main entry: returns cleaned href as string
   cleanHref(input, base) {
+    if (typeof input === "string" && input.trim().toLowerCase().startsWith(JAVASCRIPT_PROTOCOL)) {
+      return "about:blank";
+    }
+
     const resolvedBase = this.resolveBase(base);
     let u;
     try {
@@ -435,7 +531,10 @@ export const URLCleaner = {
 
     // Don’t touch internal schemes
     const s = u.protocol + "";
-    if (s === "javascript:" || s === "data:" || s === "blob:" || s === "about:") {
+    if (s === JAVASCRIPT_PROTOCOL) {
+      return "about:blank";
+    }
+    if (s === "data:" || s === "blob:" || s === "about:") {
       return u.toString();
     }
 
