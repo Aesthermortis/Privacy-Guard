@@ -1,40 +1,37 @@
-/* Display & Position */
 .pg-panel {
-  position: fixed; /* fixed */
-  top: 12px; /* top */
-  right: 12px; /* right */
-  z-index: 2147483647; /* very high */
+  position: fixed;
+  z-index: 2147483647;
+  top: 12px;
+  right: 12px;
 
-  /* Box model */
-  box-sizing: border-box; /* box-sizing */
-  width: 360px; /* width */
-  max-height: 80vh; /* max height */
-  padding: 12px; /* padding */
-  overflow: auto; /* overflow */
+  overflow: auto;
 
-  /* Background & Borders */
-  background: rgba(20, 23, 28, 0.95); /* background */
-  color: #f8fafc; /* color */
-  border: 1px solid #111827; /* border */
-  border-radius: 14px; /* radius */
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); /* shadow */
+  box-sizing: border-box;
+  width: 360px;
+  max-height: 80vh;
+  padding: 12px;
+  border: 1px solid #111827;
+  border-radius: 14px;
 
-  /* Typography */
   font-family:
-    ui-sans-serif,
     system-ui,
     -apple-system,
-    Segoe UI,
+    "Segoe UI",
     Roboto,
     Ubuntu,
     Cantarell,
-    Noto Sans,
+    "Noto Sans",
     Helvetica,
     Arial,
-    Apple Color Emoji,
-    Segoe UI Emoji; /* font */
-  font-size: 14px; /* size */
-  line-height: 1.35; /* line-height */
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    sans-serif;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #f8fafc;
+
+  background: rgb(20 23 28 / 95%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 30%);
 }
 
 .pg-panel * {
@@ -43,8 +40,8 @@
 
 .pg-row {
   display: flex;
-  align-items: center;
   gap: 8px;
+  align-items: center;
   margin: 6px 0;
 }
 
@@ -64,11 +61,14 @@
 
 .pg-btn {
   cursor: pointer;
+
+  padding: 6px 10px;
   border: 1px solid #1f2937;
   border-radius: 10px;
-  padding: 6px 10px;
-  background: #111827;
+
   color: #e5e7eb;
+
+  background: #111827;
 }
 
 .pg-btn:hover {
@@ -77,19 +77,19 @@
 
 .pg-log {
   margin-top: 8px;
-  border-top: 1px solid #1f2937;
   padding-top: 8px;
+  border-top: 1px solid #1f2937;
 }
 
 .pg-log-item {
-  border-bottom: 1px dashed #1f2937;
   padding: 6px 0;
+  border-bottom: 1px dashed #1f2937;
   word-break: break-all;
 }
 
 .pg-title {
-  font-weight: 700;
   font-size: 15px;
+  font-weight: 700;
 }
 
 .pg-muted {
@@ -105,6 +105,8 @@
   padding: 6px 8px;
   border: 1px solid #1f2937;
   border-radius: 8px;
-  background: #0b1220;
+
   color: #e5e7eb;
+
+  background: #0b1220;
 }

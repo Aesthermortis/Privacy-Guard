@@ -17,7 +17,7 @@ export function createPgSwitch({ id, label, description = "", initial = false, o
 
   const thumb = document.createElement("span");
   thumb.className = "pg-switch__thumb";
-  track.appendChild(thumb);
+  track.append(thumb);
 
   const textWrap = document.createElement("span");
   textWrap.className = "pg-switch__text";
@@ -25,17 +25,17 @@ export function createPgSwitch({ id, label, description = "", initial = false, o
   const text = document.createElement("span");
   text.className = "pg-switch__label";
   text.textContent = label;
-  textWrap.appendChild(text);
+  textWrap.append(text);
 
   if (description) {
     const hint = document.createElement("span");
     hint.className = "pg-switch__description";
     hint.textContent = description;
-    textWrap.appendChild(hint);
+    textWrap.append(hint);
   }
 
-  btn.appendChild(track);
-  btn.appendChild(textWrap);
+  btn.append(track);
+  btn.append(textWrap);
 
   /**
    * Updates the switch state and notifies listeners when it changes.
