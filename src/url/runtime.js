@@ -245,6 +245,41 @@ function restoreElementState(el, snapshot) {
   }
 }
 
+/**
+ * Handles anchor-specific rewrite logic, including neutralization and block state tracking.
+ * @param {Element} el - Anchor element being rewritten.
+ * @param {string} attr - Attribute name being processed.
+ * @param {unknown} cleaned - Cleaned attribute value.
+ * @param {boolean} force - Whether the rewrite is being forced.
+ * @returns {boolean} - True when the anchor was fully handled (neutralized).
+ */
+function handleAnchorRewrite(el, attr, cleaned, force) {
+  if (el.tagName !== "A") {
+    return false;
+  }
+  const cleanedString = typeof cleaned === "string" ? cleaned : "";
+  const blocked = cleanedString === "about:blank" || (cleanedString && isBlockedUrl(cleanedString));
+  if (!blocked) {
+    if (el.dataset.pgBlock) {
+      delete el.dataset.pgBlock;
+    }
+    return false;
+  }
+  try {
+    el.removeAttribute("target");
+  } catch {
+    /* ignore */
+  }
+  el.dataset.pgBlock = "1";
+  const snapshot = snapshotElementState(el);
+  el.setAttribute(attr, "#");
+  restoreElementState(el, snapshot);
+  if (!force) {
+    el.dataset.privacyGuardCleaned = "1";
+  }
+  return true;
+}
+
 const SWEEP_SELECTOR = "a[href], img[src], img[srcset], form[action], link[rel][href]";
 const OBSERVED_ATTRIBUTE_NAMES = ["href", "src", "srcset", "action", "rel", "ping"];
 const OBSERVED_ATTRIBUTES = new Set(OBSERVED_ATTRIBUTE_NAMES);
@@ -451,12 +486,16 @@ export const URLCleaningRuntime = {
   },
 
   // Rewrite a single element in-place if attribute exists
-  rewriteElAttr(el, attr) {
+  rewriteElAttr(el, attr, opts = {}) {
     if (!el) {
       return;
     }
+    const force = Boolean(opts && opts.force);
     const current = el.getAttribute(attr);
-    if (!current || el.dataset.privacyGuardCleaned === "1") {
+    if (!current) {
+      return;
+    }
+    if (!force && el.dataset.privacyGuardCleaned === "1") {
       return;
     }
 
@@ -467,15 +506,23 @@ export const URLCleaningRuntime = {
       cleaned = current;
     }
 
+    if (handleAnchorRewrite(el, attr, cleaned, force)) {
+      return;
+    }
+
     if (!cleaned || cleaned === current) {
-      el.dataset.privacyGuardCleaned = "1";
+      if (!force) {
+        el.dataset.privacyGuardCleaned = "1";
+      }
       return;
     }
 
     const snapshot = snapshotElementState(el);
     el.setAttribute(attr, cleaned);
     restoreElementState(el, snapshot);
-    el.dataset.privacyGuardCleaned = "1";
+    if (!force) {
+      el.dataset.privacyGuardCleaned = "1";
+    }
   },
 
   // Initial and incremental sweeps
@@ -494,17 +541,29 @@ export const URLCleaningRuntime = {
 
   // Intercept clicks to ensure last-moment cleaning (covers dynamic href)
   interceptClicks() {
-    document.addEventListener(
-      "click",
-      (e) => {
-        const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
-        if (!a) {
-          return;
+    const handler = (e) => {
+      const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
+      if (!a) {
+        return;
+      }
+      if (e.type === "auxclick" && e.button !== 1) {
+        return;
+      }
+      this.rewriteElAttr(a, "href", { force: true });
+      const href = a.getAttribute("href") || "";
+      const shouldCheck = href && !href.startsWith("#");
+      const blocked =
+        a.dataset.pgBlock === "1" || href === "about:blank" || (shouldCheck && isBlockedUrl(href));
+      if (blocked) {
+        e.preventDefault();
+        if (typeof e.stopImmediatePropagation === "function") {
+          e.stopImmediatePropagation();
         }
-        this.rewriteElAttr(a, "href");
-      },
-      true, // capture to run before site handlers
-    );
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener("click", handler, { capture: true, passive: false });
+    document.addEventListener("auxclick", handler, { capture: true, passive: false });
   },
 
   // Intercept context menu to clean links before user copies them
@@ -591,6 +650,9 @@ export const URLCleaningRuntime = {
               sanitized = URLCleaner.cleanHref(sanitized);
             } catch {
               sanitized = url;
+            }
+            if (sanitized === "about:blank" || isBlockedUrl(sanitized)) {
+              return { closed: true, close() {}, focus() {}, blur() {} };
             }
           }
           return Reflect.apply(_open, globalThis, [sanitized, name, specs]);
