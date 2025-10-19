@@ -1,10 +1,10 @@
+import { applyOverridesForHost, CONFIG, FEATURES, MODE } from "../config.js";
+import { PrivacyGuard } from "../core/privacy-guard.js";
+import { EventLog } from "../event-log.js";
+import { STORAGE } from "../storage.js";
+import { injectCSS } from "./inject-css.js";
 import panelStyles from "./panel.css";
 import switchStyles from "./styles/switch.css";
-import { injectCSS } from "./inject-css.js";
-import { STORAGE } from "../storage.js";
-import { MODE, CONFIG, FEATURES, applyOverridesForHost } from "../config.js";
-import { EventLog } from "../event-log.js";
-import { PrivacyGuard } from "../core/privacy-guard.js";
 import { createChannelToggles } from "./widgets/ChannelToggles.js";
 import { createFeatureToggles } from "./widgets/FeatureToggles.js";
 
@@ -77,6 +77,8 @@ export function setupUIPanel() {
      */
     function view() {
       const overrides = STORAGE.get(location.hostname) || { enabled: true };
+      const overridesEnabled = overrides.enabled !== false;
+      const disabledAttr = overridesEnabled ? "" : "disabled";
       const networkBlock = overrides.networkBlock || MODE.networkBlock;
       const scriptBlockMode = overrides.scriptBlockMode || CONFIG.scriptBlockMode;
       const allowSameOrigin = overrides.allowSameOrigin ?? CONFIG.allowSameOrigin;
@@ -87,7 +89,7 @@ export function setupUIPanel() {
           }</span><button type="button" class="pg-btn pg-close pg-right" title="Close" data-pg-action="close">❌</button></div>
           <div class="pg-kv"><div>Network block</div>
             <div>
-              <select class="pg-input pg-nb">
+              <select class="pg-input pg-nb" ${disabledAttr}>
                 <option value="fail" ${
                   networkBlock === "fail" ? "selected" : ""
                 }>fail (emulate network error)</option>
@@ -107,7 +109,7 @@ export function setupUIPanel() {
           </div>
           <div class="pg-kv"><div>Script mode</div>
             <div>
-              <select class="pg-input pg-sbm">
+              <select class="pg-input pg-sbm" ${disabledAttr}>
                 <option value="createElement" ${
                   scriptBlockMode === "createElement" ? "selected" : ""
                 }>createElement (strict)</option>
@@ -117,11 +119,13 @@ export function setupUIPanel() {
               </select>
             </div>
           </div>
-          <div class="pg-row"><label><input type="checkbox" class="pg-aso" ${allowSameOrigin ? "checked" : ""}/> Allow same-origin scripts</label><span class="pg-muted pg-right">Reduces privacy</span></div>
+          <div class="pg-row"><label><input type="checkbox" class="pg-aso" ${
+            allowSameOrigin ? "checked" : ""
+          } ${disabledAttr}/> Allow same-origin scripts</label><span class="pg-muted pg-right">Reduces privacy</span></div>
           <div class="pg-row"><label><input type="checkbox" class="pg-enable" ${
             overrides.enabled === false ? "" : "checked"
           }/> Enable overrides for this domain</label></div>
-          <div class="pg-row"><button type="button" class="pg-btn pg-save" data-pg-action="save">Save</button><button type="button" class="pg-btn pg-reset" data-pg-action="reset">Reset</button><span class="pg-muted pg-right">Hotkey: Ctrl+Shift+Q</span></div>
+          <div class="pg-row"><button type="button" class="pg-btn pg-reset" data-pg-action="reset">Reset</button><span class="pg-muted pg-right">Changes save automatically · Hotkey: Ctrl+Shift+Q</span></div>
           <div class="pg-log">
             <div class="pg-row"><span class="pg-title">Recent blocks</span><span class="pg-muted pg-right">${
               list.length
@@ -160,6 +164,32 @@ export function setupUIPanel() {
     }
 
     /**
+     * Wires automatic persistence for override controls so changes apply instantly.
+     * @param {HTMLElement} panelRoot Panel container element.
+     * @returns {void}
+     */
+    function installAutoPersistence(panelRoot) {
+      const controls = [
+        panelRoot.querySelector(".pg-nb"),
+        panelRoot.querySelector(".pg-sbm"),
+        panelRoot.querySelector(".pg-aso"),
+        panelRoot.querySelector(".pg-enable"),
+      ].filter(Boolean);
+
+      if (controls.length === 0) {
+        return;
+      }
+
+      const apply = () => {
+        persistOverrides(panelRoot);
+      };
+
+      for (const control of controls) {
+        control.addEventListener("change", apply);
+      }
+    }
+
+    /**
      * Persists the collected overrides for the active hostname and refreshes the UI.
      * @param {HTMLElement} panelRoot Panel container element.
      * @returns {void}
@@ -183,13 +213,11 @@ export function setupUIPanel() {
 
     /**
      * Creates a delegated click handler for panel actions.
-     * @param {HTMLElement} panelRoot Panel container element.
      * @returns {(event: MouseEvent) => void} Handler responding to action buttons.
      */
-    function createPanelClickHandler(panelRoot) {
+    function createPanelClickHandler() {
       const actionHandlers = new Map([
         ["close", () => hide()],
-        ["save", () => persistOverrides(panelRoot)],
         ["reset", () => resetOverrides()],
       ]);
 
@@ -225,7 +253,7 @@ export function setupUIPanel() {
       root.setAttribute("aria-label", "Privacy Guard Panel");
       document.documentElement.append(root);
       redraw();
-      root.addEventListener("click", createPanelClickHandler(root));
+      root.addEventListener("click", createPanelClickHandler());
     }
 
     /**
@@ -237,6 +265,7 @@ export function setupUIPanel() {
         return;
       }
       root.innerHTML = view();
+      installAutoPersistence(root);
       const mount = root.querySelector(".pg-switch-mount");
       if (mount) {
         mount.textContent = "";
