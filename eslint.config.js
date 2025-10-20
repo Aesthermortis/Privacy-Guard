@@ -1,27 +1,31 @@
+// @ts-check
+
+import comments from "@eslint-community/eslint-plugin-eslint-comments/configs";
+import css from "@eslint/css";
 import js from "@eslint/js";
-import globals from "globals";
-import { defineConfig } from "eslint/config";
-import * as tseslint from "typescript-eslint";
+import json from "@eslint/json";
+import markdown from "@eslint/markdown";
+import html from "@html-eslint/eslint-plugin";
+import * as htmlParser from "@html-eslint/parser";
+import stylistic from "@stylistic/eslint-plugin";
+import eslintConfigPrettier from "eslint-config-prettier";
+import { importX } from "eslint-plugin-import-x";
 import pluginJest from "eslint-plugin-jest";
 import jestExtended from "eslint-plugin-jest-extended";
 import jsdocPlugin from "eslint-plugin-jsdoc";
-import json from "@eslint/json";
-import markdown from "@eslint/markdown";
-import comments from "@eslint-community/eslint-plugin-eslint-comments/configs";
-import { importX } from "eslint-plugin-import-x";
+import jsxA11y from "eslint-plugin-jsx-a11y";
 import nodePlugin from "eslint-plugin-n";
+import nounsanitized from "eslint-plugin-no-unsanitized";
 import promise from "eslint-plugin-promise";
 import * as regexpPlugin from "eslint-plugin-regexp";
 import security from "eslint-plugin-security";
 import * as sonarjs from "eslint-plugin-sonarjs";
 import unicornPlugin from "eslint-plugin-unicorn";
 import yml from "eslint-plugin-yml";
+import { defineConfig } from "eslint/config";
+import globals from "globals";
+import * as tseslint from "typescript-eslint";
 import * as yamlParser from "yaml-eslint-parser";
-import css from "@eslint/css";
-import html from "@html-eslint/eslint-plugin";
-import * as htmlParser from "@html-eslint/parser";
-import stylistic from "@stylistic/eslint-plugin";
-import eslintConfigPrettier from "eslint-config-prettier";
 
 // Define glob patterns for test files
 const testGlobs = ["**/*.{test,spec}.{js,jsx,cjs,mjs,ts,tsx,cts,mts}", "**/jest.setup.js"];
@@ -34,7 +38,34 @@ const baseGlobals = {
   ...globals.greasemonkey,
 };
 
-export default defineConfig([
+/**
+ * Type guard: narrows a plugin to an object with an optional `configs` map.
+ * @param {unknown} plugin - ESLint plugin module.
+ * @returns {plugin is { configs?: Record<string, import("eslint").Linter.Config> }} True when the plugin exposes a `configs` property.
+ */
+const hasConfigs = (plugin) => {
+  return plugin != null && typeof plugin === "object" && "configs" in plugin;
+};
+
+/**
+ * Returns a plugin preset when available, keeping `@ts-check` type safety intact.
+ * @param {unknown} plugin ESLint plugin that may expose preset flat configs.
+ * @param {string} key Preset identifier to read from the plugin configuration map.
+ * @returns {import("eslint").Linter.Config | undefined} Matching flat config when the preset exists.
+ */
+const preset = (plugin, key) => {
+  if (!hasConfigs(plugin)) {
+    return;
+  }
+  const cfgs = plugin.configs;
+  if (!cfgs || !Object.prototype.hasOwnProperty.call(cfgs, key)) {
+    return;
+  }
+  const map = new Map(Object.entries(cfgs));
+  return map.get(key);
+};
+
+const flatConfig = /** @type {import("eslint").Linter.Config[]} */ ([
   {
     name: "Global Ignores",
     ignores: [
@@ -49,19 +80,20 @@ export default defineConfig([
     ],
   },
 
-  js.configs.recommended,
-  tseslint.configs.recommended,
   jsdocPlugin.configs["flat/recommended-mixed"],
   comments.recommended,
   importX.flatConfigs.recommended,
   importX.flatConfigs.typescript,
-  promise.configs["flat/recommended"],
-  security.configs.recommended,
+  preset(promise, "flat/recommended"),
+  preset(security, "recommended"),
+  jsxA11y.flatConfigs.recommended,
+  preset(nounsanitized, "recommended"),
 
   // Node
   {
     name: "Node",
     files: ["**/*.{js,jsx,mjs,ts,tsx,mts,cts}"],
+    ignores: testGlobs,
     extends: [nodePlugin.configs["flat/recommended-module"]],
   },
 
@@ -89,12 +121,16 @@ export default defineConfig([
   // JavaScript
   {
     name: "JavaScript",
-    files: ["**/*.{js,jsx,mjs}"],
+    files: ["**/*.{js,jsx,cjs,mjs}"],
     ignores: testGlobs,
     plugins: { html },
+    extends: [js.configs.recommended],
     languageOptions: {
-      ecmaVersion: "latest",
       sourceType: "module",
+      ecmaVersion: "latest",
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
       globals: { ...baseGlobals },
     },
   },
@@ -109,9 +145,18 @@ export default defineConfig([
   // TypeScript
   {
     name: "TypeScript",
-    files: ["**/*.{ts,tsx,mts,cts}"],
+    files: ["**/*.{ts,tsx,cts,mts}"],
     ignores: testGlobs,
     plugins: { html },
+    extends: [tseslint.configs.recommended],
+    languageOptions: {
+      sourceType: "module",
+      ecmaVersion: "latest",
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaFeatures: { jsx: true },
+      },
+    },
   },
 
   // Jest
@@ -121,10 +166,16 @@ export default defineConfig([
     extends: [
       pluginJest.configs["flat/recommended"],
       pluginJest.configs["flat/style"],
-      jestExtended.configs["flat/all"],
+      preset(jestExtended, "flat/all"),
     ],
     languageOptions: {
       globals: { ...baseGlobals },
+    },
+    rules: {
+      // Tests run in jsdom and may reference browser globals (EventSource, WebSocket, etc.).
+      // Disable the node builtins check here to avoid false positives about experimental
+      // Node builtin status (the configured engines range is used by the rule).
+      "n/no-unsupported-features/node-builtins": "off",
     },
   },
 
@@ -214,6 +265,9 @@ export default defineConfig([
         "{{": "}}",
       },
     },
+    rules: {
+      "no-irregular-whitespace": "off",
+    },
   },
 
   // Stylistic
@@ -234,10 +288,13 @@ export default defineConfig([
     name: "Custom",
     files: ["**/*"],
     rules: {
-      "n/no-extraneous-import": "off",
       "n/no-unpublished-import": "off",
+      "n/no-unsupported-features/node-builtins": "off",
       "unicorn/prevent-abbreviations": "off",
       "unicorn/no-null": "off",
+      "unicorn/filename-case": "off",
     },
   },
 ]);
+
+export default defineConfig(flatConfig);
