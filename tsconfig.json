@@ -8,10 +8,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
-    "types": [],
+    "types": ["node"],
     "typeRoots": ["./types", "./node_modules/@types"],
     "esModuleInterop": true
   },
-  "include": ["eslint.config.js", "src/**/*", "scripts/**/*", "types/**/*.d.ts"],
+  "include": ["eslint.config.mjs", "src/**/*", "scripts/**/*", "types/**/*.d.ts"],
   "exclude": ["dist", "node_modules"]
 }
