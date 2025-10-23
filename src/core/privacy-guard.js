@@ -1,9 +1,9 @@
-import { MODE, CONFIG } from "../config.js";
-import { BLOCKED_HOSTS, BLOCKED_RULES } from "../blocklist.js";
 import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js";
+import { BLOCKED_HOSTS, BLOCKED_RULES } from "../blocklist.js";
+import { CONFIG, MODE } from "../config.js";
 import { EventLog } from "../event-log.js";
 import { ImgPixelBlocker } from "../features/img-pixel-blocker.js";
-import { URLCleaningRuntime, setShouldBlock } from "../url/runtime.js";
+import { setShouldBlock, URLCleaningRuntime } from "../url/runtime.js";
 
 const TRUSTED_TYPES_ERROR_FRAGMENT = "TrustedScriptURL";
 
@@ -553,25 +553,24 @@ export const PrivacyGuard = {
     if (!this.STATE || !this.STATE.featureEnabled) {
       return;
     }
-    if (!Object.prototype.hasOwnProperty.call(this.STATE.featureEnabled, feature)) {
+    if (feature !== "imgPixels") {
       return;
     }
     const next = Boolean(enabled);
-    if (this.STATE.featureEnabled[feature] === next) {
+    if (this.STATE.featureEnabled.imgPixels === next) {
       return;
     }
-    this.STATE.featureEnabled[feature] = next;
-    this.applyFeatureState(feature);
+    this.STATE.featureEnabled.imgPixels = next;
+    this.applyFeatureState("imgPixels");
 
     const storage = getChannelStorage();
     if (!storage) {
       return;
     }
     try {
-      const payload = {};
-      for (const key of Object.keys(this.STATE.featureEnabled)) {
-        payload[key] = Boolean(this.STATE.featureEnabled[key]);
-      }
+      const payload = {
+        imgPixels: Boolean(this.STATE.featureEnabled.imgPixels),
+      };
       storage.setItem(FEATURE_FLAG_STORAGE_KEY, JSON.stringify(payload));
     } catch {
       /* ignore */
