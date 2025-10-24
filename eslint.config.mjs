@@ -1,8 +1,7 @@
 // @ts-check
 
-import { createRequire } from "node:module";
+import comments from "@eslint-community/eslint-plugin-eslint-comments/configs";
 import css from "@eslint/css";
-import { FlatCompat } from "@eslint/eslintrc";
 import eslint from "@eslint/js";
 import json from "@eslint/json";
 import markdown from "@eslint/markdown";
@@ -12,11 +11,15 @@ import stylistic from "@stylistic/eslint-plugin";
 import eslintConfigPrettier from "eslint-config-prettier";
 import { importX } from "eslint-plugin-import-x";
 import pluginJest from "eslint-plugin-jest";
+import jestDom from "eslint-plugin-jest-dom";
+import jestExtended from "eslint-plugin-jest-extended";
 import jsdocPlugin from "eslint-plugin-jsdoc";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import nodePlugin from "eslint-plugin-n";
 import nounsanitized from "eslint-plugin-no-unsanitized";
+import promise from "eslint-plugin-promise";
 import * as regexpPlugin from "eslint-plugin-regexp";
+import security from "eslint-plugin-security";
 import * as sonarjs from "eslint-plugin-sonarjs";
 import unicornPlugin from "eslint-plugin-unicorn";
 import yml from "eslint-plugin-yml";
@@ -25,12 +28,6 @@ import globals from "globals";
 import * as tseslint from "typescript-eslint";
 import * as yamlParser from "yaml-eslint-parser";
 
-const require = createRequire(import.meta.url);
-const security = require("eslint-plugin-security");
-
-// Define a FlatCompat instance to convert old configs
-const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
-
 /** @type {(cfg: unknown) => import("eslint").Linter.Config} */
 const asFlat = (cfg) => /** @type {import("eslint").Linter.Config} */ (cfg);
 
@@ -38,8 +35,8 @@ const asFlat = (cfg) => /** @type {import("eslint").Linter.Config} */ (cfg);
  * @typedef {{ configs: { recommended: import("eslint").Linter.Config } }} PluginWithRecommendedConfig
  */
 
-const nounsanitizedPlugin = /** @type {PluginWithRecommendedConfig} */ (
-  /** @type {unknown} */ (nounsanitized)
+const securityPlugin = /** @type {PluginWithRecommendedConfig} */ (
+  /** @type {unknown} */ (security)
 );
 
 // Define glob patterns for test files
@@ -72,12 +69,12 @@ export default defineConfig([
   tseslint.configs.recommended,
   jsdocPlugin.configs["flat/recommended-mixed"],
   jsxA11y.flatConfigs.recommended,
-  security.configs.recommended,
+  asFlat(securityPlugin.configs.recommended),
   asFlat(importX.flatConfigs.recommended),
   asFlat(importX.flatConfigs.typescript),
-  asFlat(nounsanitizedPlugin.configs.recommended),
-  ...compat.extends("plugin:promise/recommended"),
-  ...compat.extends("plugin:@eslint-community/eslint-comments/recommended"),
+  nounsanitized.configs.recommended,
+  promise.configs["flat/recommended"],
+  comments.recommended,
 
   // JavaScript
   {
@@ -168,7 +165,8 @@ export default defineConfig([
     extends: [
       pluginJest.configs["flat/recommended"],
       pluginJest.configs["flat/style"],
-      ...compat.extends("plugin:jest-extended/all"),
+      jestExtended.configs["flat/all"],
+      jestDom.configs["flat/recommended"],
     ],
     languageOptions: {
       globals: { ...baseGlobals },

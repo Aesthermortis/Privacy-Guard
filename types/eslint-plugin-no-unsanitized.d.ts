@@ -1,7 +1,10 @@
 declare module "eslint-plugin-no-unsanitized" {
   import type { Linter } from "eslint";
-  const plugin: {
-    configs?: Record<string, Linter.Config>;
+
+  const nounsanitized: {
+    configs: {
+      recommended: Linter.Config;
+    };
   };
-  export = plugin;
+  export = nounsanitized;
 }
