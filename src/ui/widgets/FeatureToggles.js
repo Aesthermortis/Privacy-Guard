@@ -19,11 +19,23 @@ export function createFeatureToggles(guard) {
     },
   });
 
+  const cmpNegation = createPgSwitch({
+    id: "pg-sw-cmpnegation",
+    label: "Refuse consent dialogs",
+    description: "Auto-decline CMPs and prevent their scripts from loading.",
+    initial: guard.isFeatureEnabled("cmpNegation"),
+    onChange: (on) => {
+      guard.setFeatureEnabled("cmpNegation", on);
+    },
+  });
+
+  group.append(cmpNegation.element);
   group.append(imgPixels.element);
 
   return {
     element: group,
     syncFromState() {
+      cmpNegation.setState(guard.isFeatureEnabled("cmpNegation"));
       imgPixels.setState(guard.isFeatureEnabled("imgPixels"));
     },
   };

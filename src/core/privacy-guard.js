@@ -2,6 +2,7 @@ import { ALLOWED_HOSTS, ALLOWED_RULES, ALLOWED_SCHEMES } from "../allowlists.js"
 import { BLOCKED_HOSTS, BLOCKED_RULES } from "../blocklist.js";
 import { CONFIG, MODE } from "../config.js";
 import { EventLog } from "../event-log.js";
+import { CMP_BLOCK_RULES, cmpNegator } from "../features/cmp-negator.js";
 import { ImgPixelBlocker } from "../features/img-pixel-blocker.js";
 import { setShouldBlock, URLCleaningRuntime } from "../url/runtime.js";
 
@@ -169,6 +170,81 @@ function urlMatches(urlObj, rules = []) {
       : `/${rule.pathStartsWith}`;
     return urlObj.pathname.startsWith(prefix);
   });
+}
+
+/**
+ * Determines whether the provided URL string uses an allowlisted scheme.
+ * @param {string} urlString - The URL string to inspect.
+ * @returns {boolean} - True when the URL scheme is allowlisted.
+ */
+function isAllowlistedScheme(urlString) {
+  return ALLOWED_SCHEMES.some((scheme) => urlString.startsWith(scheme));
+}
+
+/**
+ * Attempts to construct a URL instance from the provided string.
+ * @param {string} urlString - The URL string to parse.
+ * @returns {URL | null} - The parsed URL or null when parsing fails.
+ */
+function tryParseUrl(urlString) {
+  try {
+    return new URL(urlString, location.href);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns true when the parsed URL matches any allowlist rule.
+ * @param {URL} parsedUrl - The parsed URL to inspect.
+ * @returns {boolean} - True when the URL matches the allowlist.
+ */
+function isAllowlistedByRules(parsedUrl) {
+  return hostnameMatches(parsedUrl, ALLOWED_HOSTS) || urlMatches(parsedUrl, ALLOWED_RULES);
+}
+
+/**
+ * Determines if same-origin URLs should bypass blocking.
+ * @param {URL} parsedUrl - The URL to inspect.
+ * @returns {boolean} - True when same-origin requests are permitted.
+ */
+function isSameOriginAllowed(parsedUrl) {
+  return CONFIG.allowSameOrigin && parsedUrl.hostname === location.hostname;
+}
+
+/**
+ * Determines whether CMP-specific block rules match the parsed URL.
+ * @param {boolean} cmpActive - Indicates whether CMP negation is enabled.
+ * @param {URL} parsedUrl - The parsed URL to inspect.
+ * @returns {boolean} - True when CMP block rules should block the URL.
+ */
+function isBlockedByCmpRules(cmpActive, parsedUrl) {
+  return cmpActive && urlMatches(parsedUrl, CMP_BLOCK_RULES);
+}
+
+/**
+ * Determines whether the parsed URL matches any blocklist rules.
+ * @param {URL} parsedUrl - The parsed URL to inspect.
+ * @returns {boolean} - True when blocklist rules should block the URL.
+ */
+function isBlockedByLists(parsedUrl) {
+  return hostnameMatches(parsedUrl, BLOCKED_HOSTS) || urlMatches(parsedUrl, BLOCKED_RULES);
+}
+
+/**
+ * Determines whether the URL should be treated as a CMP asset.
+ * @param {boolean} cmpActive - Indicates whether CMP negation is enabled.
+ * @param {object | null} cmpNegatorInstance - The CMP negator instance.
+ * @param {string} urlString - The URL to inspect.
+ * @returns {boolean} - True when the URL matches a CMP asset pattern.
+ */
+function isCmpUrlMatch(cmpActive, cmpNegatorInstance, urlString) {
+  return (
+    cmpActive &&
+    cmpNegatorInstance &&
+    typeof cmpNegatorInstance.looksLikeCmpUrl === "function" &&
+    cmpNegatorInstance.looksLikeCmpUrl(urlString)
+  );
 }
 
 /**
@@ -461,10 +537,12 @@ export const PrivacyGuard = {
       sse: true,
     },
     featureEnabled: {
+      cmpNegation: true,
       imgPixels: true,
     },
   },
 
+  cmpNegator,
   imgPixelBlocker: new ImgPixelBlocker(),
 
   isChannelEnabled(kind) {
@@ -483,6 +561,9 @@ export const PrivacyGuard = {
   isFeatureEnabled(feature) {
     if (!this.STATE || !this.STATE.featureEnabled) {
       return false;
+    }
+    if (feature === "cmpNegation") {
+      return Boolean(this.STATE.featureEnabled.cmpNegation);
     }
     if (feature === "imgPixels") {
       return Boolean(this.STATE.featureEnabled.imgPixels);
@@ -553,15 +634,21 @@ export const PrivacyGuard = {
     if (!this.STATE || !this.STATE.featureEnabled) {
       return;
     }
-    if (feature !== "imgPixels") {
-      return;
-    }
     const next = Boolean(enabled);
-    if (this.STATE.featureEnabled.imgPixels === next) {
+    if (feature === "cmpNegation") {
+      if (this.STATE.featureEnabled.cmpNegation === next) {
+        return;
+      }
+      this.STATE.featureEnabled.cmpNegation = next;
+    } else if (feature === "imgPixels") {
+      if (this.STATE.featureEnabled.imgPixels === next) {
+        return;
+      }
+      this.STATE.featureEnabled.imgPixels = next;
+    } else {
       return;
     }
-    this.STATE.featureEnabled.imgPixels = next;
-    this.applyFeatureState("imgPixels");
+    this.applyFeatureState(feature);
 
     const storage = getChannelStorage();
     if (!storage) {
@@ -569,6 +656,7 @@ export const PrivacyGuard = {
     }
     try {
       const payload = {
+        cmpNegation: Boolean(this.STATE.featureEnabled.cmpNegation),
         imgPixels: Boolean(this.STATE.featureEnabled.imgPixels),
       };
       storage.setItem(FEATURE_FLAG_STORAGE_KEY, JSON.stringify(payload));
@@ -594,6 +682,9 @@ export const PrivacyGuard = {
       if (!parsed || typeof parsed !== "object") {
         return;
       }
+      if (Object.prototype.hasOwnProperty.call(parsed, "cmpNegation")) {
+        this.STATE.featureEnabled.cmpNegation = Boolean(parsed.cmpNegation);
+      }
       if (Object.prototype.hasOwnProperty.call(parsed, "imgPixels")) {
         this.STATE.featureEnabled.imgPixels = Boolean(parsed.imgPixels);
       }
@@ -604,6 +695,14 @@ export const PrivacyGuard = {
 
   applyFeatureState(feature) {
     if (!this.STATE || !this.STATE.featureEnabled) {
+      return;
+    }
+    if (feature === "cmpNegation") {
+      if (this.STATE.featureEnabled.cmpNegation) {
+        this.cmpNegator.enable();
+      } else {
+        this.cmpNegator.disable();
+      }
       return;
     }
     if (feature === "imgPixels") {
@@ -637,32 +736,27 @@ export const PrivacyGuard = {
     }
 
     const urlString = String(url);
+    const cmpActive = this.isFeatureEnabled("cmpNegation");
 
-    for (const scheme of ALLOWED_SCHEMES) {
-      if (urlString.startsWith(scheme)) {
-        return false;
-      }
+    if (isCmpUrlMatch(cmpActive, this.cmpNegator, urlString)) {
+      return true;
     }
 
-    let parsed;
-    try {
-      parsed = new URL(urlString, location.href);
-    } catch {
-      parsed = null;
+    if (isAllowlistedScheme(urlString)) {
+      return false;
     }
 
-    if (parsed) {
-      if (hostnameMatches(parsed, ALLOWED_HOSTS) || urlMatches(parsed, ALLOWED_RULES)) {
-        return false;
-      }
+    const parsed = tryParseUrl(urlString);
+    if (!parsed) {
+      return false;
+    }
 
-      if (CONFIG.allowSameOrigin && parsed.hostname === location.hostname) {
-        return false;
-      }
+    if (isAllowlistedByRules(parsed) || isSameOriginAllowed(parsed)) {
+      return false;
+    }
 
-      if (hostnameMatches(parsed, BLOCKED_HOSTS) || urlMatches(parsed, BLOCKED_RULES)) {
-        return true;
-      }
+    if (isBlockedByCmpRules(cmpActive, parsed) || isBlockedByLists(parsed)) {
+      return true;
     }
 
     return false;
