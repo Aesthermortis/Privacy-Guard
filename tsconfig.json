@@ -9,7 +9,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
-    "types": ["node"],
+    "types": ["node", "jest"],
     "typeRoots": ["./types", "./node_modules/@types"],
     "esModuleInterop": true
   },

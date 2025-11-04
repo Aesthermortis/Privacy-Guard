@@ -1,5 +1,7 @@
 import { jest } from "@jest/globals";
 import "jest-extended/all";
+import "@testing-library/jest-dom";
+
 // Silence noisy logs during tests to keep output readable.
 // Adjust the log levels you want to mute.
 beforeAll(() => {

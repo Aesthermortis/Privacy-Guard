@@ -15,11 +15,7 @@ export default {
   roots: ["<rootDir>/src", "<rootDir>/tests"],
 
   // Discover *.test.* or *.spec.* files within the dedicated tests/ folder.
-  testMatch: [
-    "<rootDir>/tests/**/*.{spec,test}.js",
-    "<rootDir>/tests/**/*.{spec,test}.mjs",
-    "<rootDir>/tests/**/*.{spec,test}.cjs",
-  ],
+  testMatch: ["<rootDir>/tests/**/*.{spec,test}.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
 
   // Mock non-JS assets to prevent parsing errors.
   moduleNameMapper: {
