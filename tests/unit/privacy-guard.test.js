@@ -1,8 +1,8 @@
 import { jest } from "@jest/globals";
+import { BLOCKED_HOSTS, BLOCKED_RULES } from "../../src/blocklist.js";
+import { CONFIG, MODE } from "../../src/config.js";
 import { PrivacyGuard } from "../../src/core/privacy-guard.js";
 import { EventLog } from "../../src/event-log.js";
-import { CONFIG, MODE } from "../../src/config.js";
-import { BLOCKED_HOSTS, BLOCKED_RULES } from "../../src/blocklist.js";
 import { URLCleaner } from "../../src/url/cleaner.js";
 
 const restoreBlockedRules = (snapshot) => {
@@ -105,6 +105,28 @@ describe("PrivacyGuard.shouldBlock", () => {
   test("allows non-tracker paths on the same host", () => {
     const url = "https://www.facebook.com/profile";
     expect(PrivacyGuard.shouldBlock(url)).toBeFalse();
+  });
+
+  test("disables heuristic CMP blocking when strict mode is off", () => {
+    const heuristicUrl = "https://static.example.com/consent-widget.js";
+    const listedCmpUrl = "https://consent.cookiebot.com/sdk.js";
+    const originalStrict = PrivacyGuard.isFeatureEnabled("cmpStrictMode");
+    const originalCmp = PrivacyGuard.isFeatureEnabled("cmpNegation");
+    try {
+      if (!originalCmp) {
+        PrivacyGuard.setFeatureEnabled("cmpNegation", true);
+      }
+      PrivacyGuard.setFeatureEnabled("cmpStrictMode", true);
+      expect(PrivacyGuard.shouldBlock(heuristicUrl)).toBeTrue();
+
+      PrivacyGuard.setFeatureEnabled("cmpStrictMode", false);
+      expect(PrivacyGuard.shouldBlock(heuristicUrl)).toBeFalse();
+
+      expect(PrivacyGuard.shouldBlock(listedCmpUrl)).toBeTrue();
+    } finally {
+      PrivacyGuard.setFeatureEnabled("cmpStrictMode", originalStrict);
+      PrivacyGuard.setFeatureEnabled("cmpNegation", originalCmp);
+    }
   });
 });
 
@@ -422,7 +444,7 @@ describe("PrivacyGuard.neutralizeScript", () => {
     PrivacyGuard.neutralizeScript(script);
 
     expect(script.type).toBe("text/plain");
-    expect(script.getAttribute("nonce")).toBeNull();
+    expect(script).not.toHaveAttribute("nonce");
     expect(removeSpy).toHaveBeenCalled();
     expect(pushSpy).toHaveBeenCalledWith(
       expect.objectContaining({

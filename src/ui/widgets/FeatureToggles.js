@@ -29,13 +29,25 @@ export function createFeatureToggles(guard) {
     },
   });
 
+  const cmpStrictMode = createPgSwitch({
+    id: "pg-sw-cmpstrict",
+    label: "Strict CMP detection",
+    description: "Block heuristically matched CMP resources.",
+    initial: guard.isFeatureEnabled("cmpStrictMode"),
+    onChange: (on) => {
+      guard.setFeatureEnabled("cmpStrictMode", on);
+    },
+  });
+
   group.append(cmpNegation.element);
+  group.append(cmpStrictMode.element);
   group.append(imgPixels.element);
 
   return {
     element: group,
     syncFromState() {
       cmpNegation.setState(guard.isFeatureEnabled("cmpNegation"));
+      cmpStrictMode.setState(guard.isFeatureEnabled("cmpStrictMode"));
       imgPixels.setState(guard.isFeatureEnabled("imgPixels"));
     },
   };

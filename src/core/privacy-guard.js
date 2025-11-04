@@ -8,6 +8,17 @@ import { setShouldBlock, URLCleaningRuntime } from "../url/runtime.js";
 
 const TRUSTED_TYPES_ERROR_FRAGMENT = "TrustedScriptURL";
 
+export let CMP_STRICT_MODE = true;
+
+/**
+ * Updates the CMP strict mode flag used during URL evaluation.
+ * @param {boolean} next - Desired strict mode state.
+ * @returns {void}
+ */
+function setCmpStrictMode(next) {
+  CMP_STRICT_MODE = Boolean(next);
+}
+
 /**
  * Trusted Types helper: wraps script URLs only when Trusted Types are available.
  * @returns {{ wrapScriptURL: (value: unknown) => unknown }}
@@ -538,6 +549,7 @@ export const PrivacyGuard = {
     },
     featureEnabled: {
       cmpNegation: true,
+      cmpStrictMode: true,
       imgPixels: true,
     },
   },
@@ -564,6 +576,9 @@ export const PrivacyGuard = {
     }
     if (feature === "cmpNegation") {
       return Boolean(this.STATE.featureEnabled.cmpNegation);
+    }
+    if (feature === "cmpStrictMode") {
+      return Boolean(this.STATE.featureEnabled.cmpStrictMode);
     }
     if (feature === "imgPixels") {
       return Boolean(this.STATE.featureEnabled.imgPixels);
@@ -635,18 +650,32 @@ export const PrivacyGuard = {
       return;
     }
     const next = Boolean(enabled);
-    if (feature === "cmpNegation") {
-      if (this.STATE.featureEnabled.cmpNegation === next) {
+    switch (feature) {
+      case "cmpNegation": {
+        if (this.STATE.featureEnabled.cmpNegation === next) {
+          return;
+        }
+        this.STATE.featureEnabled.cmpNegation = next;
+        break;
+      }
+      case "cmpStrictMode": {
+        if (this.STATE.featureEnabled.cmpStrictMode === next) {
+          return;
+        }
+        this.STATE.featureEnabled.cmpStrictMode = next;
+        setCmpStrictMode(next);
+        break;
+      }
+      case "imgPixels": {
+        if (this.STATE.featureEnabled.imgPixels === next) {
+          return;
+        }
+        this.STATE.featureEnabled.imgPixels = next;
+        break;
+      }
+      default: {
         return;
       }
-      this.STATE.featureEnabled.cmpNegation = next;
-    } else if (feature === "imgPixels") {
-      if (this.STATE.featureEnabled.imgPixels === next) {
-        return;
-      }
-      this.STATE.featureEnabled.imgPixels = next;
-    } else {
-      return;
     }
     this.applyFeatureState(feature);
 
@@ -657,6 +686,7 @@ export const PrivacyGuard = {
     try {
       const payload = {
         cmpNegation: Boolean(this.STATE.featureEnabled.cmpNegation),
+        cmpStrictMode: Boolean(this.STATE.featureEnabled.cmpStrictMode),
         imgPixels: Boolean(this.STATE.featureEnabled.imgPixels),
       };
       storage.setItem(FEATURE_FLAG_STORAGE_KEY, JSON.stringify(payload));
@@ -685,12 +715,18 @@ export const PrivacyGuard = {
       if (Object.prototype.hasOwnProperty.call(parsed, "cmpNegation")) {
         this.STATE.featureEnabled.cmpNegation = Boolean(parsed.cmpNegation);
       }
+      if (Object.prototype.hasOwnProperty.call(parsed, "cmpStrictMode")) {
+        const strict = Boolean(parsed.cmpStrictMode);
+        this.STATE.featureEnabled.cmpStrictMode = strict;
+        setCmpStrictMode(strict);
+      }
       if (Object.prototype.hasOwnProperty.call(parsed, "imgPixels")) {
         this.STATE.featureEnabled.imgPixels = Boolean(parsed.imgPixels);
       }
     } catch {
       /* ignore */
     }
+    setCmpStrictMode(this.STATE.featureEnabled.cmpStrictMode);
   },
 
   applyFeatureState(feature) {
@@ -703,6 +739,10 @@ export const PrivacyGuard = {
       } else {
         this.cmpNegator.disable();
       }
+      return;
+    }
+    if (feature === "cmpStrictMode") {
+      setCmpStrictMode(this.STATE.featureEnabled.cmpStrictMode);
       return;
     }
     if (feature === "imgPixels") {
@@ -738,7 +778,7 @@ export const PrivacyGuard = {
     const urlString = String(url);
     const cmpActive = this.isFeatureEnabled("cmpNegation");
 
-    if (isCmpUrlMatch(cmpActive, this.cmpNegator, urlString)) {
+    if (cmpActive && CMP_STRICT_MODE && isCmpUrlMatch(cmpActive, this.cmpNegator, urlString)) {
       return true;
     }
 
