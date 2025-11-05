@@ -280,6 +280,110 @@ function handleAnchorRewrite(el, attr, cleaned, force) {
   return true;
 }
 
+/**
+ * Safely creates a URL instance, attempting optional base fallbacks for relative inputs.
+ * @param {unknown} value - URL candidate to parse.
+ * @param {string[]} bases - Optional base URLs used when value is relative.
+ * @returns {URL | null} - Parsed URL instance or null when parsing fails.
+ */
+function tryCreateUrl(value, bases = []) {
+  if (typeof value !== "string" || !value || value === "about:blank") {
+    return null;
+  }
+  try {
+    return new URL(value);
+  } catch {
+    for (const base of bases) {
+      if (typeof base !== "string" || !base || base === "about:blank") {
+        continue;
+      }
+      try {
+        return new URL(value, base);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Resolves a base URL whose origin matches the cleaned target.
+ * @param {Element} el - Anchor element being processed.
+ * @param {string} cleanedValue - Cleaned attribute value.
+ * @returns {{ baseHref: string, cleanedUrl: URL | null }} - Matching base info.
+ */
+function resolveMatchingBase(el, cleanedValue) {
+  const locationHref = typeof location === "undefined" ? "" : location.href;
+  const docBase = typeof document === "undefined" ? "" : document.baseURI;
+  const candidateBases = [locationHref, el.baseURI, docBase];
+  const cleanedUrl = tryCreateUrl(cleanedValue, candidateBases);
+  if (cleanedUrl) {
+    for (const candidate of candidateBases) {
+      const baseUrl = tryCreateUrl(candidate);
+      if (baseUrl && cleanedUrl.origin === baseUrl.origin) {
+        return { baseHref: baseUrl.href, cleanedUrl };
+      }
+    }
+  }
+  return { baseHref: "", cleanedUrl };
+}
+
+/**
+ * Preserves relative anchor hrefs when the cleaned target resolves within the same origin.
+ * @param {Element} el - Anchor being processed.
+ * @param {string} attr - Attribute under rewrite.
+ * @param {unknown} originalValue - Original attribute value.
+ * @param {unknown} cleanedValue - Candidate rewritten value.
+ * @returns {unknown} - Potentially relativized attribute value.
+ */
+function relativizeSameOriginAnchorHref(el, attr, originalValue, cleanedValue) {
+  const originalHref =
+    typeof originalValue === "string" ? originalValue : String(originalValue ?? "");
+  const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(originalHref);
+  const isProtocolRelative = originalHref.startsWith("//");
+  const shouldSkip =
+    attr !== "href" || el.tagName !== "A" || !originalHref || hasScheme || isProtocolRelative;
+  if (shouldSkip) {
+    return cleanedValue;
+  }
+  if (typeof cleanedValue === "string" && cleanedValue.length > 0) {
+    const { baseHref, cleanedUrl } = resolveMatchingBase(el, cleanedValue);
+    if (baseHref && cleanedUrl) {
+      return `${cleanedUrl.pathname}${cleanedUrl.search}${cleanedUrl.hash}`;
+    }
+  }
+  return cleanedValue;
+}
+
+/**
+ * Cleans navigation-triggering anchors before clicks open them.
+ * @this {typeof URLCleaningRuntime}
+ * @param {MouseEvent} e - Click event dispatched by the document.
+ * @returns {void}
+ */
+function handleNavigationEvent(e) {
+  const anchor = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
+  if (!anchor) {
+    return;
+  }
+  if (e.type === "auxclick" && e.button !== 1) {
+    return;
+  }
+  this.rewriteElAttr(anchor, "href", { force: true });
+  const href = anchor.getAttribute("href") || "";
+  const shouldCheck = href && !href.startsWith("#");
+  const blocked =
+    anchor.dataset.pgBlock === "1" || href === "about:blank" || (shouldCheck && isBlockedUrl(href));
+  if (blocked) {
+    e.preventDefault();
+    if (typeof e.stopImmediatePropagation === "function") {
+      e.stopImmediatePropagation();
+    }
+    e.stopPropagation();
+  }
+}
+
 const SWEEP_SELECTOR = "a[href], img[src], img[srcset], form[action], link[rel][href]";
 const OBSERVED_ATTRIBUTE_NAMES = ["href", "src", "srcset", "action", "rel", "ping"];
 const OBSERVED_ATTRIBUTES = new Set(OBSERVED_ATTRIBUTE_NAMES);
@@ -510,6 +614,8 @@ export const URLCleaningRuntime = {
       return;
     }
 
+    cleaned = relativizeSameOriginAnchorHref(el, attr, current, cleaned);
+
     if (!cleaned || cleaned === current) {
       if (!force) {
         el.dataset.privacyGuardCleaned = "1";
@@ -541,27 +647,7 @@ export const URLCleaningRuntime = {
 
   // Intercept clicks to ensure last-moment cleaning (covers dynamic href)
   interceptClicks() {
-    const handler = (e) => {
-      const a = e.target && (e.target.closest ? e.target.closest("a[href]") : null);
-      if (!a) {
-        return;
-      }
-      if (e.type === "auxclick" && e.button !== 1) {
-        return;
-      }
-      this.rewriteElAttr(a, "href", { force: true });
-      const href = a.getAttribute("href") || "";
-      const shouldCheck = href && !href.startsWith("#");
-      const blocked =
-        a.dataset.pgBlock === "1" || href === "about:blank" || (shouldCheck && isBlockedUrl(href));
-      if (blocked) {
-        e.preventDefault();
-        if (typeof e.stopImmediatePropagation === "function") {
-          e.stopImmediatePropagation();
-        }
-        e.stopPropagation();
-      }
-    };
+    const handler = handleNavigationEvent.bind(this);
     document.addEventListener("click", handler, { capture: true, passive: false });
     document.addEventListener("auxclick", handler, { capture: true, passive: false });
   },

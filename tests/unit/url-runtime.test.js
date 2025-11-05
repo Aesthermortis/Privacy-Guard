@@ -57,7 +57,8 @@ describe("URLCleaningRuntime.maybeNeutralizeLinkEl", () => {
     URLCleaningRuntime.maybeNeutralizeLinkEl(link);
 
     expect(link.isConnected).toBeTrue();
-    expect(link.getAttribute("href")).toBe(
+    expect(link).toHaveAttribute(
+      "href",
       "https://clean.example/" + encodeURIComponent("https://cdn.example/file.js?foo=1"),
     );
     expect(link.dataset.extra).toBe("value");
@@ -82,7 +83,7 @@ describe("URLCleaningRuntime.maybeNeutralizeLinkEl", () => {
     URLCleaningRuntime.maybeNeutralizeLinkEl(link);
 
     expect(link.isConnected).toBeTrue();
-    expect(link.getAttribute("href")).toBe("https://cleaned.example/");
+    expect(link).toHaveAttribute("href", "https://cleaned.example/");
     expect(link.dataset.privacyGuardCleaned).toBe("1");
     expect(cleanSpy).toHaveBeenCalledOnce();
   });
@@ -161,7 +162,7 @@ describe("URLCleaningRuntime.rewriteElAttr", () => {
 
     URLCleaningRuntime.rewriteElAttr(anchor, "href");
 
-    expect(anchor.getAttribute("href")).toBe("https://example.com/redirect");
+    expect(anchor).toHaveAttribute("href", "https://example.com/redirect");
     expect(anchor.className).toBe("cta-link");
     expect(anchor.dataset.token).toBe("abc");
     expect(anchor.dataset.privacyGuardCleaned).toBe("1");
@@ -175,7 +176,35 @@ describe("URLCleaningRuntime.rewriteElAttr", () => {
 
     URLCleaningRuntime.rewriteElAttr(img, "src");
 
-    expect(img.getAttribute("src")).toBe("https://example.com/image.jpg");
+    expect(img).toHaveAttribute("src", "https://example.com/image.jpg");
     expect(img.dataset.privacyGuardCleaned).toBe("1");
+  });
+
+  test("should_preserve_relative_href_when_cleaned_target_is_same_origin", () => {
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", "/series/foo");
+
+    jest.spyOn(URLCleaner, "cleanHref").mockImplementation(() => {
+      return "https://example.test/series/foo?utm=1#section";
+    });
+
+    URLCleaningRuntime.rewriteElAttr(anchor, "href");
+
+    expect(anchor).toHaveAttribute("href", "/series/foo?utm=1#section");
+    expect(anchor.dataset.privacyGuardCleaned).toBe("1");
+  });
+
+  test("should_keep_absolute_href_when_cleaned_target_is_cross_origin", () => {
+    const anchor = document.createElement("a");
+    anchor.setAttribute("href", "/movie/bar");
+
+    jest.spyOn(URLCleaner, "cleanHref").mockImplementation(() => {
+      return "https://cdn.example.com/movie/bar";
+    });
+
+    URLCleaningRuntime.rewriteElAttr(anchor, "href");
+
+    expect(anchor).toHaveAttribute("href", "https://cdn.example.com/movie/bar");
+    expect(anchor.dataset.privacyGuardCleaned).toBe("1");
   });
 });
