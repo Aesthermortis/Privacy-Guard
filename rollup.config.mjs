@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { string as importHtml } from "rollup-plugin-string";
 import { clean as semverClean, valid as semverValid } from "semver";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -117,5 +118,5 @@ export default {
     strict: false,
   },
   treeshake: true,
-  plugins: [cssAsStringPlugin],
+  plugins: [importHtml({ include: "**/*.html" }), cssAsStringPlugin],
 };

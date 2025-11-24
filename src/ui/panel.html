@@ -1,0 +1,71 @@
+<section class="pg-panel" role="dialog" aria-label="Privacy Guard Panel" data-pg-root>
+  <div class="pg-row">
+    <span class="pg-title">Privacy Guard</span>
+    <span class="pg-chip" data-pg-hostname></span>
+    <button type="button" class="pg-btn pg-close pg-right" title="Close" data-pg-action="close">
+      ❌
+    </button>
+  </div>
+
+  <div class="pg-kv">
+    <div>Network block</div>
+    <div>
+      <select class="pg-input pg-nb" data-pg-network>
+        <option value="fail">fail (emulate network error)</option>
+        <option value="silent">silent (204 no content)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="pg-kv pg-network-toggles">
+    <div>Channels</div>
+    <div class="pg-switch-help">Per site (this domain only)</div>
+    <div class="pg-switch-mount" data-pg-switches aria-live="polite"></div>
+  </div>
+
+  <div class="pg-kv pg-feature-toggles">
+    <div>Protections</div>
+    <div class="pg-switch-help">Per site (this domain only)</div>
+    <div class="pg-feature-switch-mount" data-pg-feature-switches aria-live="polite"></div>
+  </div>
+
+  <div class="pg-kv">
+    <div>Script mode</div>
+    <div>
+      <select class="pg-input pg-sbm" data-pg-script-mode>
+        <option value="createElement">createElement (strict)</option>
+        <option value="observer">observer (conservative)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="pg-row">
+    <label>
+      <input type="checkbox" class="pg-aso" data-pg-allow-so />
+      Allow same-origin scripts
+    </label>
+    <span class="pg-muted pg-right">Reduces privacy</span>
+  </div>
+
+  <div class="pg-row">
+    <label>
+      <input type="checkbox" class="pg-enable" data-pg-enable />
+      Enable overrides for this domain
+    </label>
+  </div>
+
+  <div class="pg-row">
+    <button type="button" class="pg-btn pg-reset" data-pg-action="reset">Reset</button>
+    <span class="pg-muted pg-right" data-pg-hotkey
+      >Changes save automatically - Hotkey: Ctrl+Shift+Q</span
+    >
+  </div>
+
+  <div class="pg-log">
+    <div class="pg-row">
+      <span class="pg-title">Recent blocks</span>
+      <span class="pg-muted pg-right" data-pg-log-count>0</span>
+    </div>
+    <div class="pg-log-items" data-pg-log aria-live="polite"></div>
+  </div>
+</section>

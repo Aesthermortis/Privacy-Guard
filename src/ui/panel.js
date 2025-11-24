@@ -2,11 +2,26 @@ import { applyOverridesForHost, CONFIG, FEATURES, MODE } from "../config.js";
 import { PrivacyGuard } from "../core/privacy-guard.js";
 import { EventLog } from "../event-log.js";
 import { STORAGE } from "../storage.js";
+import { renderHTML } from "../utils/render-html.js";
 import { injectCSS } from "./inject-css.js";
+import { mountUI } from "./mount-ui.js";
 import panelStyles from "./panel.css";
 import switchStyles from "./styles/switch.css";
 import { createChannelToggles } from "./widgets/ChannelToggles.js";
 import { createFeatureToggles } from "./widgets/FeatureToggles.js";
+
+/**
+ * Finds an existing CSP nonce from the document so injected styles comply with strict CSPs.
+ * @param {Document} doc Document to inspect.
+ * @returns {string} Resolved nonce or empty string when not found.
+ */
+function detectCspNonce(doc = document) {
+  const nonceSource = doc.querySelector('style[nonce],link[rel="stylesheet"][nonce],script[nonce]');
+  if (!nonceSource) {
+    return "";
+  }
+  return nonceSource.nonce || nonceSource.getAttribute("nonce") || "";
+}
 
 /**
  * Determines whether the received keyboard event matches the configured hotkey.
@@ -39,8 +54,13 @@ export function setupUIPanel() {
   }
 
   const UIPanel = (() => {
-    let root = null;
+    let host = null;
+    let shadow = null;
+    let refs = null;
     let visible = false;
+    let cssApplied = false;
+    let autoPersistenceAttached = false;
+    let clickHandlerAttached = false;
     PrivacyGuard.loadChannelEnabled();
     PrivacyGuard.loadFeatureFlags();
     const channelToggles = createChannelToggles(PrivacyGuard);
@@ -50,8 +70,14 @@ export function setupUIPanel() {
      * Ensures the Privacy Guard panel stylesheet is injected into the document.
      */
     function ensureCss() {
-      injectCSS("pg-style", panelStyles);
-      injectCSS("pg-switch-style", switchStyles);
+      if (!shadow || cssApplied) {
+        return;
+      }
+      const nonce = detectCspNonce(document);
+      const injectOptions = { gmFallback: true, nonce };
+      injectCSS("pg-style", panelStyles, shadow, injectOptions);
+      injectCSS("pg-switch-style", switchStyles, shadow, injectOptions);
+      cssApplied = true;
     }
 
     /**
@@ -72,76 +98,143 @@ export function setupUIPanel() {
     }
 
     /**
-     * Builds the panel HTML using host overrides, global defaults, and recent event log entries.
-     * @returns {string} HTML markup representing the current state of the Privacy Guard panel.
+     * Computes the current panel state combining overrides and defaults.
+     * @returns {{overridesEnabled: boolean, networkBlock: string, scriptBlockMode: string, allowSameOrigin: boolean, list: import("../event-log.js").EventLogEntry[]}}
+     * State snapshot for the UI.
      */
-    function view() {
+    function getPanelState() {
       const overrides = STORAGE.get(location.hostname) || { enabled: true };
       const overridesEnabled = overrides.enabled !== false;
-      const disabledAttr = overridesEnabled ? "" : "disabled";
       const networkBlock = overrides.networkBlock || MODE.networkBlock;
       const scriptBlockMode = overrides.scriptBlockMode || CONFIG.scriptBlockMode;
       const allowSameOrigin = overrides.allowSameOrigin ?? CONFIG.allowSameOrigin;
-      const list = EventLog.list();
-      const html = `
-          <div class="pg-row"><span class="pg-title">Privacy Guard</span><span class="pg-chip">${
-            location.hostname
-          }</span><button type="button" class="pg-btn pg-close pg-right" title="Close" data-pg-action="close">❌</button></div>
-          <div class="pg-kv"><div>Network block</div>
-            <div>
-              <select class="pg-input pg-nb" ${disabledAttr}>
-                <option value="fail" ${
-                  networkBlock === "fail" ? "selected" : ""
-                }>fail (emulate network error)</option>
-                <option value="silent" ${
-                  networkBlock === "silent" ? "selected" : ""
-                }>silent (204 no content)</option>
-              </select>
-            </div>
-          </div>
-          <div class="pg-kv pg-network-toggles"><div>Channels</div>
-            <div class="pg-switch-help">Per site (this domain only)</div>
-            <div class="pg-switch-mount"></div>
-          </div>
-          <div class="pg-kv pg-feature-toggles"><div>Protections</div>
-            <div class="pg-switch-help">Per site (this domain only)</div>
-            <div class="pg-feature-switch-mount"></div>
-          </div>
-          <div class="pg-kv"><div>Script mode</div>
-            <div>
-              <select class="pg-input pg-sbm" ${disabledAttr}>
-                <option value="createElement" ${
-                  scriptBlockMode === "createElement" ? "selected" : ""
-                }>createElement (strict)</option>
-                <option value="observer" ${
-                  scriptBlockMode === "observer" ? "selected" : ""
-                }>observer (conservative)</option>
-              </select>
-            </div>
-          </div>
-          <div class="pg-row"><label><input type="checkbox" class="pg-aso" ${
-            allowSameOrigin ? "checked" : ""
-          } ${disabledAttr}/> Allow same-origin scripts</label><span class="pg-muted pg-right">Reduces privacy</span></div>
-          <div class="pg-row"><label><input type="checkbox" class="pg-enable" ${
-            overrides.enabled === false ? "" : "checked"
-          }/> Enable overrides for this domain</label></div>
-          <div class="pg-row"><button type="button" class="pg-btn pg-reset" data-pg-action="reset">Reset</button><span class="pg-muted pg-right">Changes save automatically · Hotkey: Ctrl+Shift+Q</span></div>
-          <div class="pg-log">
-            <div class="pg-row"><span class="pg-title">Recent blocks</span><span class="pg-muted pg-right">${
-              list.length
-            }</span></div>
-            ${list
-              .slice(0, 25)
-              .map((event) => {
-                const kind = escapeHtml(event.kind);
-                const time = new Date(event.time).toLocaleTimeString();
-                const url = escapeHtml(event.url);
-                return `<div class="pg-log-item"><b>${kind}</b> <span class="pg-muted">${time}</span><div>${url}</div></div>`;
-              })
-              .join("")}
-          </div>
-        `;
-      return html;
+      return {
+        overridesEnabled,
+        networkBlock,
+        scriptBlockMode,
+        allowSameOrigin,
+        list: EventLog.list(),
+      };
+    }
+
+    /**
+     * Formats the configured hotkey into human readable text.
+     * @param {{ctrl?: boolean, shift?: boolean, alt?: boolean, key?: string}} hk Hotkey descriptor.
+     * @returns {string} Human readable hotkey.
+     */
+    function formatHotkey(hk) {
+      const segments = [];
+      if (hk.ctrl) {
+        segments.push("Ctrl");
+      }
+      if (hk.shift) {
+        segments.push("Shift");
+      }
+      if (hk.alt) {
+        segments.push("Alt");
+      }
+      const key = (hk.key || "").trim();
+      if (key) {
+        segments.push(key.length === 1 ? key.toUpperCase() : key);
+      }
+      return segments.join("+") || "Ctrl+Shift+Q";
+    }
+
+    /**
+     * Updates the hotkey helper label based on the active hotkey configuration.
+     * @returns {void}
+     */
+    function updateHotkeyLabel() {
+      if (!refs || !refs.hotkey) {
+        return;
+      }
+      const activeHotkey = hotkey || DEFAULT_HOTKEY;
+      refs.hotkey.textContent =
+        "Changes save automatically - Hotkey: " + formatHotkey(activeHotkey);
+    }
+
+    /**
+     * Updates static control state and metadata labels.
+     * @param {ReturnType<typeof getPanelState>} state Latest panel state.
+     * @returns {void}
+     */
+    function updateControls(state) {
+      if (!refs) {
+        return;
+      }
+      if (refs.hostname) {
+        refs.hostname.textContent = location.hostname;
+      }
+      if (refs.network instanceof HTMLSelectElement) {
+        refs.network.value = state.networkBlock;
+        refs.network.disabled = !state.overridesEnabled;
+      }
+      if (refs.scriptMode instanceof HTMLSelectElement) {
+        refs.scriptMode.value = state.scriptBlockMode;
+        refs.scriptMode.disabled = !state.overridesEnabled;
+      }
+      if (refs.allowSameOrigin instanceof HTMLInputElement) {
+        refs.allowSameOrigin.checked = state.allowSameOrigin;
+        refs.allowSameOrigin.disabled = !state.overridesEnabled;
+      }
+      if (refs.enableOverrides instanceof HTMLInputElement) {
+        refs.enableOverrides.checked = state.overridesEnabled;
+      }
+      updateHotkeyLabel();
+    }
+
+    /**
+     * Renders the event log entries into the panel.
+     * @param {import("../event-log.js").EventLogEntry[]} entries Event list.
+     * @returns {void}
+     */
+    function updateLog(entries) {
+      if (!refs) {
+        return;
+      }
+      if (refs.logCount) {
+        refs.logCount.textContent = String(entries.length);
+      }
+      if (!refs.logContainer) {
+        return;
+      }
+      const markup = entries
+        .slice(0, 25)
+        .map((event) => {
+          const kind = escapeHtml(event.kind);
+          const time = new Date(event.time).toLocaleTimeString();
+          const url = escapeHtml(event.url);
+          return (
+            '<div class="pg-log-item"><b>' +
+            kind +
+            '</b> <span class="pg-muted">' +
+            time +
+            "</span><div>" +
+            url +
+            "</div></div>"
+          );
+        })
+        .join("");
+      const html = markup || '<div class="pg-muted">No recent blocks</div>';
+      renderHTML(refs.logContainer, html);
+    }
+
+    /**
+     * Ensures interactive toggles are mounted inside the shadow root.
+     * @returns {void}
+     */
+    function installToggles() {
+      if (!refs) {
+        return;
+      }
+      if (refs.switches) {
+        refs.switches.replaceChildren(channelToggles.element);
+        channelToggles.syncFromState();
+      }
+      if (refs.features) {
+        refs.features.replaceChildren(featureToggles.element);
+        featureToggles.syncFromState();
+      }
     }
 
     /**
@@ -151,10 +244,10 @@ export function setupUIPanel() {
      * Collected override values.
      */
     function collectOverridesFromDom(panelRoot) {
-      const nb = panelRoot.querySelector(".pg-nb");
-      const sbm = panelRoot.querySelector(".pg-sbm");
-      const enabled = panelRoot.querySelector(".pg-enable");
-      const aso = panelRoot.querySelector(".pg-aso");
+      const nb = panelRoot.querySelector("[data-pg-network]");
+      const sbm = panelRoot.querySelector("[data-pg-script-mode]");
+      const enabled = panelRoot.querySelector("[data-pg-enable]");
+      const aso = panelRoot.querySelector("[data-pg-allow-so]");
       return {
         enabled: Boolean(enabled && enabled.checked),
         networkBlock: nb && nb.value ? nb.value : MODE.networkBlock,
@@ -170,10 +263,10 @@ export function setupUIPanel() {
      */
     function installAutoPersistence(panelRoot) {
       const controls = [
-        panelRoot.querySelector(".pg-nb"),
-        panelRoot.querySelector(".pg-sbm"),
-        panelRoot.querySelector(".pg-aso"),
-        panelRoot.querySelector(".pg-enable"),
+        panelRoot.querySelector("[data-pg-network]"),
+        panelRoot.querySelector("[data-pg-script-mode]"),
+        panelRoot.querySelector("[data-pg-allow-so]"),
+        panelRoot.querySelector("[data-pg-enable]"),
       ].filter(Boolean);
 
       if (controls.length === 0) {
@@ -239,21 +332,26 @@ export function setupUIPanel() {
     }
 
     /**
-     * Creates the panel host element and binds interaction handlers on first invocation.
+     * Creates the panel host element (or reuses it) and binds interaction handlers.
      * @returns {void}
      */
     function mount() {
-      if (root) {
-        return;
-      }
+      const mounted = mountUI();
+      host = mounted.host;
+      shadow = mounted.shadow;
+      refs = mounted.refs;
+
       ensureCss();
-      root = document.createElement("div");
-      root.className = "pg-panel";
-      root.setAttribute("role", "dialog");
-      root.setAttribute("aria-label", "Privacy Guard Panel");
-      document.documentElement.append(root);
-      redraw();
-      root.addEventListener("click", createPanelClickHandler());
+
+      if (refs.root && !clickHandlerAttached) {
+        refs.root.addEventListener("click", createPanelClickHandler());
+        clickHandlerAttached = true;
+      }
+
+      if (refs.root && !autoPersistenceAttached) {
+        installAutoPersistence(refs.root);
+        autoPersistenceAttached = true;
+      }
     }
 
     /**
@@ -261,23 +359,14 @@ export function setupUIPanel() {
      * @returns {void}
      */
     function redraw() {
-      if (!root) {
+      if (!shadow || !refs || !refs.root) {
         return;
       }
-      root.innerHTML = view();
-      installAutoPersistence(root);
-      const mount = root.querySelector(".pg-switch-mount");
-      if (mount) {
-        mount.textContent = "";
-        mount.append(channelToggles.element);
-        channelToggles.syncFromState();
-      }
-      const featureMount = root.querySelector(".pg-feature-switch-mount");
-      if (featureMount) {
-        featureMount.textContent = "";
-        featureMount.append(featureToggles.element);
-        featureToggles.syncFromState();
-      }
+      ensureCss();
+      const state = getPanelState();
+      updateControls(state);
+      installToggles();
+      updateLog(state.list);
     }
 
     /**
@@ -285,13 +374,11 @@ export function setupUIPanel() {
      * @returns {void}
      */
     function show() {
-      if (!root) {
-        mount();
-      }
-      if (!root) {
+      mount();
+      if (!host) {
         return;
       }
-      root.style.display = "block";
+      host.style.display = "block";
       visible = true;
       redraw();
     }
@@ -301,10 +388,10 @@ export function setupUIPanel() {
      * @returns {void}
      */
     function hide() {
-      if (!root) {
+      if (!host) {
         return;
       }
-      root.style.display = "none";
+      host.style.display = "none";
       visible = false;
     }
 

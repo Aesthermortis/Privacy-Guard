@@ -8,7 +8,7 @@ import markdown from "@eslint/markdown";
 import html from "@html-eslint/eslint-plugin";
 import * as htmlParser from "@html-eslint/parser";
 import stylistic from "@stylistic/eslint-plugin";
-import eslintConfigPrettier from "eslint-config-prettier";
+import eslintConfigPrettier from "eslint-config-prettier/flat";
 import { importX } from "eslint-plugin-import-x";
 import pluginJest from "eslint-plugin-jest";
 import jestDom from "eslint-plugin-jest-dom";
@@ -65,8 +65,12 @@ export default defineConfig([
     ],
   },
 
-  eslint.configs.recommended,
-  tseslint.configs.recommended,
+  {
+    name: "ESLint core (JS/TS)",
+    files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
+    extends: [eslint.configs.recommended],
+  },
+
   jsdocPlugin.configs["flat/recommended-mixed"],
   jsxA11y.flatConfigs.recommended,
   asFlat(securityPlugin.configs.recommended),
@@ -250,6 +254,7 @@ export default defineConfig([
     language: "css/css",
     rules: {
       "no-irregular-whitespace": "off",
+      "css/use-baseline": ["error", { available: "newly" }],
     },
   },
 
@@ -263,13 +268,21 @@ export default defineConfig([
     languageOptions: {
       parser: htmlParser,
       // This tells the parser to treat {{ ... }} as template syntax,
-      // so it won’t try to parse contents inside as regular HTML
+      // so it won't try to parse contents inside as regular HTML
       templateEngineSyntax: {
         "{{": "}}",
       },
     },
     rules: {
       "no-irregular-whitespace": "off",
+      // Disable all formatting rules - let Prettier handle formatting
+      "html/indent": "off",
+      "html/attrs-newline": "off",
+      "html/no-extra-spacing-attrs": "off",
+      // Disable doctype rule for HTML fragments (like injected panels)
+      "html/require-doctype": "off",
+      // Always require self-closing tags for void elements
+      "html/require-closing-tags": ["error", { selfClosing: "always" }],
     },
   },
 
@@ -281,10 +294,7 @@ export default defineConfig([
   },
 
   // Prettier
-  {
-    name: "Prettier",
-    ...eslintConfigPrettier,
-  },
+  eslintConfigPrettier,
 
   // Custom rules
   {

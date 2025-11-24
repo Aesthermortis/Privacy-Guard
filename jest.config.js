@@ -20,6 +20,7 @@ export default {
   // Mock non-JS assets to prevent parsing errors.
   moduleNameMapper: {
     "\\.css$": "<rootDir>/tests/setup/fileMock.js",
+    "\\.html$": "<rootDir>/tests/setup/htmlMock.js",
   },
 
   // Run setup code after the test environment is ready (per test file).

@@ -1,3 +1,10 @@
+@supports (scrollbar-color: auto) {
+  .pg-panel {
+    scrollbar-color: #4b5563 transparent;
+    scrollbar-width: thin;
+  }
+}
+
 .pg-panel {
   position: fixed;
   z-index: 2147483647;
@@ -30,6 +37,7 @@
   line-height: 1.35;
   color: #f8fafc;
 
+  color-scheme: dark;
   background: rgb(20 23 28 / 95%);
   box-shadow: 0 8px 24px rgb(0 0 0 / 30%);
 }
@@ -109,4 +117,21 @@
   color: #e5e7eb;
 
   background: #0b1220;
+}
+
+/* Custom scrollbar styles for WebKit browsers */
+.pg-panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.pg-panel::-webkit-scrollbar-thumb {
+  border: 2px solid #1f2937;
+  border-radius: 8px;
+  background: #4b5563;
+}
+
+.pg-panel::-webkit-scrollbar-thumb:focus,
+.pg-panel::-webkit-scrollbar-thumb:active,
+.pg-panel::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
 }
