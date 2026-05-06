@@ -1,2 +1,13 @@
+# Force LF line endings for all text files in the repo,
+# overriding any global core.autocrlf setting.
 * text=auto eol=lf
+
+# Husky hooks must stay LF so they run correctly on all platforms.
 .husky/* text eol=lf
+
+# Binaries — no line-ending conversion.
+*.png binary
+*.jpg binary
+*.ico binary
+*.gz  binary
+*.zip binary
