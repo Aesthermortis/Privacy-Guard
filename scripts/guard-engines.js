@@ -1,107 +1,52 @@
 /**
- * @file Ensures the running Node.js and npm versions satisfy the
- * engines requirements before allowing further script execution.
+ * @file Ensures the running Node.js and npm versions satisfy the engines requirements before allowing further script
+ *       execution.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const defaultFs = { existsSync, readFileSync };
-
 /**
- * Get the major version number from a version string.
- * @param {string|number} v - The version string to parse.
- * @returns {number} - The major version number.
- */
-export function major(v) {
-  return Number.parseInt(String(v).split(".")[0], 10);
-}
-
-/**
- * Check whether `candidate` is within `parent` directory.
- * @param {string} parent - The parent directory to test against.
- * @param {string} candidate - The path to verify.
- * @returns {boolean} - True when the candidate stays within the parent tree.
- */
-function isPathInside(parent, candidate) {
-  const resolvedParent = path.resolve(parent);
-  const resolvedCandidate = path.resolve(candidate);
-  if (resolvedParent === resolvedCandidate) {
-    return true;
-  }
-
-  const relative = path.relative(resolvedParent, resolvedCandidate);
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
-}
-
-/**
- * Extract npm version from npm_config_user_agent env variable.
- * @param {NodeJS.ProcessEnv} env - Environment variables bag.
- * @returns {string|null} - The npm version when found.
- */
-function npmVersionFromUserAgent(env) {
-  const ua = env.npm_config_user_agent || "";
-  const match = ua.match(/npm\/(\d+\.\d+\.\d+)/);
-  return match ? match[1] : null;
-}
-
-/**
- * Extract npm version from npm_config_npm_version env variable.
- * @param {NodeJS.ProcessEnv} env - Environment variables bag.
- * @returns {string|null} - The npm version when found.
- */
-function npmVersionFromConfigVar(env) {
-  const npmConfigVersion = env.npm_config_npm_version;
-  return npmConfigVersion || null;
-}
-
-/**
- * Extract npm version by inspecting the npm installation directory.
- * @param {NodeJS.ProcessEnv} env - Environment variables bag.
- * @param {FilesystemHooks} fsTools - Filesystem helper functions.
- * @returns {string|null} - The npm version when found.
- */
-function npmVersionFromExecPath(env, fsTools) {
-  const execpath = env.npm_execpath;
-  if (!execpath || !path.isAbsolute(execpath)) {
-    return null;
-  }
-
-  const baseDir = path.resolve(path.dirname(execpath), "..");
-  const packageJsonPath = path.join(baseDir, "package.json");
-
-  if (!isPathInside(baseDir, packageJsonPath)) {
-    throw new Error("Resolved package.json path escapes npm directory.");
-  }
-
-  if (!fsTools.existsSync(packageJsonPath)) {
-    return null;
-  }
-
-  try {
-    const npmPackage = JSON.parse(fsTools.readFileSync(packageJsonPath, "utf8"));
-    if (npmPackage && typeof npmPackage.version === "string") {
-      return npmPackage.version;
-    }
-  } catch (error) {
-    console.warn(
-      `[engines] Unable to read npm version from npm_execpath: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-
-  return null;
-}
-
-/**
- * Get the npm version string.
  * Filesystem helpers contract.
+ *
  * @typedef {object} FilesystemHooks
  * @property {(path: string) => boolean} existsSync - `fs.existsSync`-compatible helper.
  * @property {(path: string, encoding: BufferEncoding) => string} readFileSync - File reader.
  */
 
+const defaultFs = { existsSync, readFileSync };
+
 /**
+ * Ensure current process satisfies engine requirements.
+ *
+ * @param {object} [options] - Execution options.
+ * @param {NodeJS.ProcessEnv} [options.env] - Environment variables.
+ * @param {FilesystemHooks} [options.fs] - Filesystem hooks used to read npm metadata.
+ * @param {string} [options.nodeVersion] - Override detected Node version.
+ * @param {number} [options.requiredNodeMajor] - Required Node major version. Defaults to 24.
+ * @param {number} [options.requiredNpmMajor] - Required npm major version. Defaults to 11.
+ * @returns {{ nodeVersion: string; npmVersion: string }} - Verified versions.
+ */
+export function ensureEngines({
+  env = process.env,
+  fs = defaultFs,
+  nodeVersion = process.versions.node,
+  requiredNodeMajor = 24,
+  requiredNpmMajor = 11,
+} = {}) {
+  const npmVersion = getNpmVersion({ env, fs });
+  return validateEngines({
+    nodeVersion,
+    npmVersion,
+    requiredNodeMajor,
+    requiredNpmMajor,
+  });
+}
+
+/**
+ * Get the npm version string.
+ *
  * @param {object} [options] - Resolution options.
  * @param {NodeJS.ProcessEnv} [options.env] - Environment variables bag.
  * @param {FilesystemHooks} [options.fs] - Filesystem hooks used to read npm metadata.
@@ -125,13 +70,24 @@ export function getNpmVersion({ env = process.env, fs = defaultFs } = {}) {
 }
 
 /**
+ * Get the major version number from a version string.
+ *
+ * @param {string | number} v - The version string to parse.
+ * @returns {number} - The major version number.
+ */
+export function major(v) {
+  return Number.parseInt(String(v).split(".")[0], 10);
+}
+
+/**
  * Validate runtime against required engine versions.
+ *
  * @param {object} [options] - Validation options.
- * @param {string} options.nodeVersion - Detected Node.js version.
- * @param {string} options.npmVersion - Detected npm version.
+ * @param {string} [options.nodeVersion] - Detected Node.js version.
+ * @param {string} [options.npmVersion] - Detected npm version.
  * @param {number} [options.requiredNodeMajor] - Required Node major version (defaults to 24).
  * @param {number} [options.requiredNpmMajor] - Required npm major version (defaults to 11).
- * @returns {{nodeVersion: string, npmVersion: string}} - Verified versions.
+ * @returns {{ nodeVersion: string; npmVersion: string }} - Verified versions.
  */
 export function validateEngines({
   nodeVersion,
@@ -158,8 +114,8 @@ export function validateEngines({
     const errorDetails = [
       `[engines] Node >=${requiredNodeMajor} and npm >=${requiredNpmMajor} are required.`,
       `Detected: node ${nodeVersion}, npm ${npmVersion}`,
-      `[debug] npm_execpath=${process.env.npm_execpath || ""}`,
-      `[debug] npm_config_user_agent=${process.env.npm_config_user_agent || ""}`,
+      `[debug] npm_execpath=${process.env.npm_execpath ?? ""}`,
+      `[debug] npm_config_user_agent=${process.env.npm_config_user_agent ?? ""}`,
     ].join("\n");
 
     throw new Error(errorDetails);
@@ -169,33 +125,8 @@ export function validateEngines({
 }
 
 /**
- * Ensure current process satisfies engine requirements.
- * @param {object} [options] - Execution options.
- * @param {NodeJS.ProcessEnv} [options.env] - Environment variables.
- * @param {FilesystemHooks} [options.fs] - Filesystem hooks used to read npm metadata.
- * @param {string} [options.nodeVersion] - Override detected Node version.
- * @param {number} [options.requiredNodeMajor] - Required Node major version. Defaults to 24.
- * @param {number} [options.requiredNpmMajor] - Required npm major version. Defaults to 11.
- * @returns {{nodeVersion: string, npmVersion: string}} - Verified versions.
- */
-export function ensureEngines({
-  env = process.env,
-  fs = defaultFs,
-  nodeVersion = process.versions.node,
-  requiredNodeMajor = 24,
-  requiredNpmMajor = 11,
-} = {}) {
-  const npmVersion = getNpmVersion({ env, fs });
-  return validateEngines({
-    nodeVersion,
-    npmVersion,
-    requiredNodeMajor,
-    requiredNpmMajor,
-  });
-}
-
-/**
  * Determine whether the current module is executed directly.
+ *
  * @returns {boolean} - True when the script is the main entry point.
  */
 function isMainScript() {
@@ -205,6 +136,90 @@ function isMainScript() {
 
   const currentFile = fileURLToPath(import.meta.url);
   return path.resolve(process.argv[1]) === currentFile;
+}
+
+/**
+ * Check whether `candidate` is within `parent` directory.
+ *
+ * @param {string} parent - The parent directory to test against.
+ * @param {string} candidate - The path to verify.
+ * @returns {boolean} - True when the candidate stays within the parent tree.
+ */
+function isPathInside(parent, candidate) {
+  const resolvedParent = path.resolve(parent);
+  const resolvedCandidate = path.resolve(candidate);
+  if (resolvedParent === resolvedCandidate) {
+    return true;
+  }
+
+  const relative = path.relative(resolvedParent, resolvedCandidate);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+/**
+ * Extract npm version from npm_config_npm_version env variable.
+ *
+ * @param {NodeJS.ProcessEnv} env - Environment variables bag.
+ * @returns {string | null} - The npm version when found.
+ */
+function npmVersionFromConfigVar(env) {
+  const npmConfigVersion = env.npm_config_npm_version;
+  return npmConfigVersion ?? null;
+}
+
+/**
+ * Extract npm version by inspecting the npm installation directory.
+ *
+ * @param {NodeJS.ProcessEnv} env - Environment variables bag.
+ * @param {FilesystemHooks} fsTools - Filesystem helper functions.
+ * @returns {string | null} - The npm version when found.
+ */
+function npmVersionFromExecPath(env, fsTools) {
+  const execpath = env.npm_execpath;
+  if (!execpath || !path.isAbsolute(execpath)) {
+    return null;
+  }
+
+  const baseDir = path.resolve(path.dirname(execpath), "..");
+  const packageJsonPath = path.join(baseDir, "package.json");
+
+  if (!isPathInside(baseDir, packageJsonPath)) {
+    throw new Error("Resolved package.json path escapes npm directory.");
+  }
+
+  if (!fsTools.existsSync(packageJsonPath)) {
+    return null;
+  }
+
+  try {
+    const parsedPackage = /** @type {unknown} */ (
+      JSON.parse(fsTools.readFileSync(packageJsonPath, "utf8"))
+    );
+    if (typeof parsedPackage === "object" && parsedPackage !== null) {
+      const npmPackage = /** @type {Record<string, unknown>} */ (parsedPackage);
+      if (typeof npmPackage.version === "string") {
+        return npmPackage.version;
+      }
+    }
+  } catch (error) {
+    console.warn(
+      `[engines] Unable to read npm version from npm_execpath: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Extract npm version from npm_config_user_agent env variable.
+ *
+ * @param {NodeJS.ProcessEnv} env - Environment variables bag.
+ * @returns {string | null} - The npm version when found.
+ */
+function npmVersionFromUserAgent(env) {
+  const ua = env.npm_config_user_agent ?? "";
+  const match = /npm\/(\d+\.\d+\.\d+)/.exec(ua);
+  return match ? match[1] : null;
 }
 
 if (isMainScript()) {
