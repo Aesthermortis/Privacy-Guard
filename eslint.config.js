@@ -7,48 +7,26 @@ import json from "@eslint/json";
 import markdown from "@eslint/markdown";
 import html from "@html-eslint/eslint-plugin";
 import * as htmlParser from "@html-eslint/parser";
-import stylistic from "@stylistic/eslint-plugin";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 import { importX } from "eslint-plugin-import-x";
-import pluginJest from "eslint-plugin-jest";
+import jest from "eslint-plugin-jest";
 import jestDom from "eslint-plugin-jest-dom";
 import jestExtended from "eslint-plugin-jest-extended";
 import jsdocPlugin from "eslint-plugin-jsdoc";
-import jsxA11y from "eslint-plugin-jsx-a11y";
 import nodePlugin from "eslint-plugin-n";
 import nounsanitized from "eslint-plugin-no-unsanitized";
+import * as perfectionist from "eslint-plugin-perfectionist";
 import promise from "eslint-plugin-promise";
 import * as regexpPlugin from "eslint-plugin-regexp";
 import security from "eslint-plugin-security";
 import * as sonarjs from "eslint-plugin-sonarjs";
+import testingLibrary from "eslint-plugin-testing-library";
 import unicornPlugin from "eslint-plugin-unicorn";
 import yml from "eslint-plugin-yml";
 import { defineConfig } from "eslint/config";
 import globals from "globals";
-import * as tseslint from "typescript-eslint";
+import tseslint from "typescript-eslint";
 import * as yamlParser from "yaml-eslint-parser";
-
-/** @type {(cfg: unknown) => import("eslint").Linter.Config} */
-const asFlat = (cfg) => /** @type {import("eslint").Linter.Config} */ (cfg);
-
-/**
- * @typedef {{ configs: { recommended: import("eslint").Linter.Config } }} PluginWithRecommendedConfig
- */
-
-const securityPlugin = /** @type {PluginWithRecommendedConfig} */ (
-  /** @type {unknown} */ (security)
-);
-
-// Define glob patterns for test files
-const testGlobs = ["**/*.{test,spec}.{js,jsx,cjs,mjs,ts,tsx,cts,mts}", "**/jest.setup.js"];
-
-// Base global variables for all environments
-const baseGlobals = {
-  ...globals.browser,
-  ...globals.es2025,
-  ...globals.node,
-  ...globals.greasemonkey,
-};
 
 export default defineConfig([
   {
@@ -68,67 +46,28 @@ export default defineConfig([
   {
     name: "ESLint core (JS/TS)",
     files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
-    extends: [eslint.configs.recommended],
-  },
-
-  jsdocPlugin.configs["flat/recommended-mixed"],
-  jsxA11y.flatConfigs.recommended,
-  asFlat(securityPlugin.configs.recommended),
-  asFlat(importX.flatConfigs.recommended),
-  asFlat(importX.flatConfigs.typescript),
-  nounsanitized.configs.recommended,
-  promise.configs["flat/recommended"],
-  comments.recommended,
-
-  // JavaScript
-  {
-    name: "JavaScript",
-    files: ["**/*.{js,jsx,cjs,mjs}"],
-    ignores: testGlobs,
     plugins: { html },
+    extends: [
+      eslint.configs.recommended,
+      tseslint.configs.recommendedTypeChecked,
+      regexpPlugin.configs["flat/recommended"],
+      sonarjs.configs.recommended,
+      unicornPlugin.configs.recommended,
+      perfectionist.configs["recommended-alphabetical"],
+      nodePlugin.configs["flat/recommended-module"],
+    ],
     languageOptions: {
-      sourceType: "module",
       ecmaVersion: "latest",
-      parserOptions: {
-        ecmaFeatures: { jsx: true },
-      },
-      globals: { ...baseGlobals },
-    },
-  },
-
-  // CommonJS
-  {
-    name: "CommonJS",
-    files: ["**/*.cjs"],
-    extends: [nodePlugin.configs["flat/recommended-script"]],
-  },
-
-  // TypeScript
-  {
-    name: "TypeScript",
-    files: ["**/*.{ts,tsx,cts,mts}"],
-    ignores: testGlobs,
-    plugins: { html },
-    extends: [tseslint.configs.recommendedTypeChecked],
-    languageOptions: {
-      sourceType: "module",
-      ecmaVersion: "latest",
-      parser: tseslint.parser,
+      globals: { ...globals.browser, ...globals.es2025, ...globals.node, ...globals.greasemonkey },
       parserOptions: {
         ecmaFeatures: { jsx: true },
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
+      sourceType: "module",
     },
-  },
-
-  // Node
-  {
-    name: "Node",
-    files: ["**/*.{js,jsx,mjs,ts,tsx,mts,cts}"],
-    ignores: testGlobs,
-    extends: [nodePlugin.configs["flat/recommended-module"]],
     rules: {
+      "n/no-extraneous-import": ["error", { allowModules: ["vscode"] }],
       "n/no-missing-import": [
         "error",
         {
@@ -137,49 +76,62 @@ export default defineConfig([
           tryExtensions: [".ts", ".d.ts", ".js", ".json", ".node"],
         },
       ],
-      "n/no-extraneous-import": ["error", { allowModules: ["vscode"] }],
+      "n/no-unpublished-import": "off",
+      "n/no-unsupported-features/node-builtins": "off",
+      "unicorn/filename-case": [
+        "error",
+        {
+          cases: {
+            camelCase: true,
+            kebabCase: true,
+            pascalCase: true,
+          },
+        },
+      ],
+      "unicorn/no-null": "off",
+      "unicorn/prevent-abbreviations": "off",
     },
   },
 
-  // RegExp
+  jsdocPlugin.configs["flat/recommended-mixed"],
+  security.configs.recommended,
+  importX.flatConfigs.recommended,
+  nounsanitized.configs.recommended,
+  promise.configs["flat/recommended"],
+  comments.recommended,
+
   {
-    name: "RegExp",
+    name: "JSDoc style handled by Prettier",
     files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
-    extends: [regexpPlugin.configs["flat/recommended"]],
+    rules: {
+      "jsdoc/tag-lines": [
+        "error",
+        "never",
+        { endLines: 0, startLines: 1, tags: { typedef: { lines: "any" } } },
+      ],
+    },
   },
 
-  // Sonarjs
+  // CommonJS
   {
-    name: "Sonarjs",
-    files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
-    extends: [sonarjs.configs["recommended"]],
-  },
-
-  // Unicorn
-  {
-    name: "Unicorn",
-    files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
-    extends: [unicornPlugin.configs["recommended"]],
+    name: "CommonJS",
+    files: ["**/*.{cjs,cts}"],
+    extends: [nodePlugin.configs["flat/recommended-script"]],
   },
 
   // Jest
   {
     name: "Tests",
-    files: testGlobs,
+    files: ["**/*.{test,__tests__,spec}.{js,jsx,cjs,mjs,ts,tsx,cts,mts}", "**/jest.setup.js"],
     extends: [
-      pluginJest.configs["flat/recommended"],
-      pluginJest.configs["flat/style"],
-      jestExtended.configs["flat/all"],
+      jest.configs["flat/recommended"],
+      jest.configs["flat/style"],
       jestDom.configs["flat/recommended"],
+      jestExtended.configs["flat/all"],
+      testingLibrary.configs["flat/dom"],
     ],
     languageOptions: {
-      globals: { ...baseGlobals },
-    },
-    rules: {
-      // Tests run in jsdom and may reference browser globals (EventSource, WebSocket, etc.).
-      // Disable the node builtins check here to avoid false positives about experimental
-      // Node builtin status (the configured engines range is used by the rule).
-      "n/no-unsupported-features/node-builtins": "off",
+      globals: { ...globals.jest },
     },
   },
 
@@ -215,6 +167,9 @@ export default defineConfig([
     plugins: { json },
     extends: ["json/recommended"],
     language: "json/json5",
+    rules: {
+      "no-irregular-whitespace": "off",
+    },
   },
 
   // Markdown
@@ -239,9 +194,6 @@ export default defineConfig([
     extends: [yml.configs["flat/recommended"]],
     languageOptions: {
       parser: yamlParser,
-      parserOptions: {
-        defaultYAMLVersion: "1.2",
-      },
     },
   },
 
@@ -253,8 +205,8 @@ export default defineConfig([
     extends: ["css/recommended"],
     language: "css/css",
     rules: {
-      "no-irregular-whitespace": "off",
       "css/use-baseline": ["error", { available: "newly" }],
+      "no-irregular-whitespace": "off",
     },
   },
 
@@ -274,38 +226,57 @@ export default defineConfig([
       },
     },
     rules: {
-      "no-irregular-whitespace": "off",
+      "html/attrs-newline": "off",
       // Disable all formatting rules - let Prettier handle formatting
       "html/indent": "off",
-      "html/attrs-newline": "off",
       "html/no-extra-spacing-attrs": "off",
-      // Disable doctype rule for HTML fragments (like injected panels)
-      "html/require-doctype": "off",
       // Always require self-closing tags for void elements
       "html/require-closing-tags": ["error", { selfClosing: "always" }],
+      // Disable doctype rule for HTML fragments (like injected panels)
+      "html/require-doctype": "off",
+      "no-irregular-whitespace": "off",
     },
-  },
-
-  // Stylistic
-  {
-    name: "Stylistic",
-    files: ["**/*.{js,jsx,cjs,mjs,ts,tsx,cts,mts}"],
-    extends: [stylistic.configs.recommended],
   },
 
   // Prettier
   eslintConfigPrettier,
 
-  // Custom rules
   {
-    name: "Custom",
-    files: ["**/*"],
+    name: "Perfectionist override for ESLint config",
+    files: ["eslint.config.js"],
     rules: {
-      "n/no-unpublished-import": "off",
-      "n/no-unsupported-features/node-builtins": "off",
-      "unicorn/prevent-abbreviations": "off",
-      "unicorn/no-null": "off",
-      "unicorn/filename-case": "off",
+      "perfectionist/sort-objects": [
+        "error",
+        {
+          customGroups: [
+            { elementNamePattern: "^name$", groupName: "name", selector: "property" },
+            { elementNamePattern: "^files$", groupName: "files", selector: "property" },
+            { elementNamePattern: "^ignores$", groupName: "ignores", selector: "property" },
+            { elementNamePattern: "^plugins$", groupName: "plugins", selector: "property" },
+            { elementNamePattern: "^extends$", groupName: "extends", selector: "property" },
+            { elementNamePattern: "^language$", groupName: "language", selector: "property" },
+            {
+              elementNamePattern: "^languageOptions$",
+              groupName: "languageOptions",
+              selector: "property",
+            },
+            { elementNamePattern: "^rules$", groupName: "rules", selector: "property" },
+          ],
+          groups: [
+            "name",
+            "files",
+            "ignores",
+            "plugins",
+            "extends",
+            "language",
+            "languageOptions",
+            "rules",
+            "unknown",
+          ],
+          order: "asc",
+          type: "alphabetical",
+        },
+      ],
     },
   },
 ]);
