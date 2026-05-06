@@ -45,6 +45,7 @@
     "@types/eslint-plugin-security": "^3.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.12.2",
+    "@types/tampermonkey": "^5.0.5",
     "concurrently": "^9.2.1",
     "conventional-changelog-conventionalcommits": "^9.1.0",
     "eslint": "^9.39.4",

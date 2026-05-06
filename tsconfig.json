@@ -9,10 +9,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "lib": ["ESNext", "DOM"],
-    "types": ["node", "jest"],
+    "types": ["node", "jest", "tampermonkey"],
     "typeRoots": ["./types", "./node_modules/@types"],
     "esModuleInterop": true
   },
-  "include": ["eslint.config.mjs", "src/**/*", "scripts/**/*", "types/**/*.d.ts"],
-  "exclude": ["dist", "node_modules"]
+  "include": ["*.config.js", "src/**/*", "scripts/**/*", "tests/**/*", "types/**/*.d.ts"],
+  "exclude": ["dist", "coverage", "node_modules"]
 }
