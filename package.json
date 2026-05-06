@@ -44,7 +44,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@types/eslint-plugin-security": "^3.0.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.12.2",
+    "@types/node": "^25.6.0",
     "@types/tampermonkey": "^5.0.5",
     "concurrently": "^9.2.1",
     "conventional-changelog-conventionalcommits": "^9.3.1",
