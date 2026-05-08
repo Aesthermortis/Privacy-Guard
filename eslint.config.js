@@ -22,7 +22,7 @@ import security from "eslint-plugin-security";
 import * as sonarjs from "eslint-plugin-sonarjs";
 import testingLibrary from "eslint-plugin-testing-library";
 import unicornPlugin from "eslint-plugin-unicorn";
-import yml from "eslint-plugin-yml";
+import * as yml from "eslint-plugin-yml";
 import { defineConfig } from "eslint/config";
 import globals from "globals";
 import tseslint from "typescript-eslint";
@@ -97,7 +97,7 @@ export default defineConfig([
   security.configs.recommended,
   importX.flatConfigs.recommended,
   nounsanitized.configs.recommended,
-  promise.configs["flat/recommended"],
+  promise.configs.recommended,
   comments.recommended,
 
   {
@@ -122,12 +122,12 @@ export default defineConfig([
   // Jest
   {
     name: "Tests",
-    files: ["**/*.{test,__tests__,spec}.{js,jsx,cjs,mjs,ts,tsx,cts,mts}", "**/jest.setup.js"],
+    files: ["**/*.{test,spec}.{js,jsx,cjs,mjs,ts,tsx,cts,mts}", "**/jest.setup.js"],
     extends: [
       jest.configs["flat/recommended"],
       jest.configs["flat/style"],
-      jestDom.configs["flat/recommended"],
-      jestExtended.configs["flat/all"],
+      jestDom.configs.recommended,
+      jestExtended.configs.all,
       testingLibrary.configs["flat/dom"],
     ],
     languageOptions: {
