@@ -46,7 +46,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^25.9.3",
     "@types/tampermonkey": "^5.0.5",
-    "concurrently": "^9.2.1",
+    "concurrently": "^10.0.3",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "eslint": "^10.5.0",
     "eslint-config-prettier": "^10.1.8",
